@@ -117,7 +117,7 @@ int main(int argc,char **argv) {
     }
 
     gettimeofday(&timestamp,NULL);
-    printf("%d.%06d, %d\n", timestamp.tv_sec, timestamp.tv_usec, pdu->seq);
+    printf("%ld.%06d, %llu\n", timestamp.tv_sec, timestamp.tv_usec, pdu->seq);
 
     // sending ACK
     z = sendto(s, pdu, sizeof(udp_packet_t), 0, (struct sockaddr *)&adr_srvr, len_inet);

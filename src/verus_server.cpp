@@ -380,7 +380,7 @@ void* delayProfile_thread (void *arg)
     while (!terminate) {
         if (slowStart){
             // still in slowstart phase we should not calculate the delay curve
-            usleep (0.0001);
+            usleep (1);
         }
         else{
             // in normal mode we should compute the delay curve and sleep for the delay curve refresh timer
