@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.69])
-AC_INIT([Verus], [1.0], [yz48@nyu.edu])
+AC_INIT([Verus], [1.0], [yasir.zaki@nyu.edu])
 AC_CONFIG_AUX_DIR([build-aux])
 AM_INIT_AUTOMAKE(-Wall -Werror foreign)
 AC_CONFIG_SRCDIR([src/verus.hpp])
