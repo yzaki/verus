@@ -22,7 +22,7 @@ class Alglib3 < Formula
       f.puts("CONFIG      += warn_on release static_and_shared")
       f.puts("QT      -= gui core")
       f.puts("LIBS    -= -lQtGui -lQtCore")
-      f.puts("TARGET       = alglib3")
+      f.puts("TARGET       = alglib")
       f.puts("VERSION      = 3.8.2")
       f.puts("TEMPLATE     = lib")
       f.puts("target.path = $$PREFIX/lib")
