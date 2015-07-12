@@ -709,6 +709,11 @@ int main(int argc,char **argv) {
     for (int j=0; j<20000; j++)
         wList[j]=-1;
 
+    if (argc < 7) {
+        std::cout << "syntax should be ./verus_server -name NAME -p PORT -t TIME (sec) \n";
+        exit(0);
+    }
+
     while (i != (argc-1)) {
         i=i+1;
         if (!strcmp (argv[i], "-name")) {

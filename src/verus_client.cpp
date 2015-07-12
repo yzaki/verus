@@ -56,6 +56,11 @@ int main(int argc,char **argv) {
   struct timeval timestamp;
   setbuf(stdout, NULL);
 
+  if (argc < 5) {
+    std::cout << "syntax should be ./verus_client -ip IP -p PORT \n";
+    exit(0);
+  }
+
   while (i != (argc-1)) { // Check that we haven't finished parsing already
     i=i+1;
     if (!strcmp (argv[i], "-ip")) {
