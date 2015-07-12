@@ -18,6 +18,8 @@ AC_PROG_CC
 AC_CONFIG_MACRO_DIR([m4])
 AX_BOOST_BASE([1.54])
 AX_BOOST_SYSTEM()
+AC_CHECK_LIB([tbb], [main], [], [echo "libtbb not found.  Please install the tbb before proceeding."; exit -1])
+AC_CHECK_LIB([pthread], [pthread_mutex_init], [], [echo "pthreads not found.  Please install pthread library before proceeding"; exit -1])
 
 # Checks for header files.
 AC_CHECK_HEADERS([arpa/inet.h netinet/in.h stdlib.h string.h sys/socket.h sys/time.h unistd.h])
