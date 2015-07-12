@@ -9,7 +9,7 @@ class Alglib3 < Formula
   depends_on "pkg-config" => :build
 
   def install
-    File.open("#{buildpath}/alglib3.pro", "w") do |f|
+    File.open("#{buildpath}/alglib.pro", "w") do |f|
       f.puts("TEMPLATE = subdirs")
       f.puts("SUBDIRS = \\")
       f.puts("    src")
@@ -43,7 +43,7 @@ class Alglib3 < Formula
       f.puts("QMAKE_PKGCONFIG_DESTDIR = pkgconfig")
     end
 
-    system "qmake", "alglib3.pro", "PREFIX=#{prefix}"
+    system "qmake", "alglib.pro", "PREFIX=#{prefix}"
     system "make"
     system "make", "install"
   end
