@@ -51,10 +51,14 @@ void* timeout_thread (void *arg)
 int main(int argc,char **argv) {
   int z;
   int i = 0;
+  char command[512];
+  char tmp[512];
   char* port;
+  bool terminate = false;
   udp_packet_t *pdu;
   struct timeval timestamp;
   setbuf(stdout, NULL);
+  std::ofstream clientLog;
 
   if (argc < 5) {
     std::cout << "syntax should be ./verus_client -ip IP -p PORT \n";
@@ -75,6 +79,9 @@ int main(int argc,char **argv) {
     }
   }
 
+  sprintf (command, "client_%s.out", port);
+  clientLog.open(command);
+
   memset(&adr_srvr,0,sizeof adr_srvr);
 
   adr_srvr.sin_family = AF_INET;
@@ -92,6 +99,8 @@ int main(int argc,char **argv) {
     displayError("socket()");
   }
 
+  std::cout << "Sending request to server \n";
+
   //printf("Sending Hallo to %s:%s\n", srvr_addr, port);
   z = sendto(s,"Hallo", strlen("Hallo"), 0, (struct sockaddr *)&adr_srvr, len_inet);
   if ( z < 0 )
@@ -103,21 +112,28 @@ int main(int argc,char **argv) {
   pdu = (udp_packet_t *) malloc(sizeof(udp_packet_t));
 
   // starting to loop waiting to receive data and to ACK
-  while(1) {
+  while(!terminate) {
 
     socklen_t len = sizeof(struct sockaddr_in);
     z = recvfrom(s, pdu, sizeof(udp_packet_t), 0, (struct sockaddr *)&adr, &len);
     if ( z < 0 )
       displayError("recvfrom(2)");
 
+    if (pdu->ss_id < 0) {
+      clientLog.close();
+      terminate = true;
+    }
+
     // stopping the io timer for the timeout
     if (!receivedPkt) {
       receivedPkt = true;
       io.stop();
+      std::cout << "Connected to server \n";
     }
 
     gettimeofday(&timestamp,NULL);
-    printf("%ld.%06d, %llu\n", timestamp.tv_sec, timestamp.tv_usec, pdu->seq);
+    sprintf(tmp, "%ld.%06d, %llu\n", timestamp.tv_sec, timestamp.tv_usec, pdu->seq);
+    clientLog << tmp;
 
     // sending ACK
     z = sendto(s, pdu, sizeof(udp_packet_t), 0, (struct sockaddr *)&adr_srvr, len_inet);
@@ -125,6 +141,7 @@ int main(int argc,char **argv) {
       displayError("sendto(2)");
   }
 
+  std::cout << "Client exiting \n";
   close(s);
   return 0;
 }

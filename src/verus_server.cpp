@@ -751,7 +751,7 @@ int main(int argc,char **argv) {
     if (bind (s, (struct sockaddr *)&adr_inet, sizeof(adr_inet)) < 0)
     	displayError("bind()");
 
-    std::cout << "Waiting for request\n";
+    std::cout << "Server " << port << " waiting for request\n";
 
     // waiting for initialization packet
     if (recvfrom(s, dgram, sizeof (dgram), 0, (struct sockaddr *)&adr_clnt, &len_inet) < 0)
@@ -788,7 +788,7 @@ int main(int argc,char **argv) {
     // sending the first for slow start
     tempS = 1;
 
-    std::cout << "Client is connected\n";
+    std::cout << "Client " << port << " is connected\n";
 
     while (relativeTime <= timeToRun) {
 
@@ -870,12 +870,15 @@ int main(int argc,char **argv) {
     lossLog.close();
     receiverLog.close();
     io.stop();
+    ssId = -1;
+    tempS = 1;
+
+    usleep (1000000);
     terminate = true;
+    usleep (1000000);
 
-    usleep (2000000);
-
+    std::cout << "Server " << port << " is exiting\n";
     close(s);
-    std::cout << "Server is exiting\n";
 
     return 0;
 }
