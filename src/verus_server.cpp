@@ -823,22 +823,27 @@ int main(int argc,char **argv) {
 
             //write2Log (verusLog2, std::to_string(dMax), std::to_string(dMaxLast), std::to_string(deltaDBar), "", "");
 
-            if (dMaxLast/dMin > VERUS_R) {
-         	    if (!exitSlowStart) {
-	         	    dEst = fmax (dMin, (dEst-DELTA2));
-
-	                if (dEst == dMin && wCrt < 2) {
-	                    dMin += 10;
-	                }
-	                else if (dEst == dMin)
-	                	dMinStop=true;
-         	    }
-            }
-            else if (deltaDBar > 0.0001)
-            	dEst = fmax (dMin, (dEst-DELTA1));
-            else
+            // to deal with networks with RTT smaller than 20ms
+            if (dMaxLast < 20)
             	dEst += DELTA2;
-            	//dEst = fmin (dEst+DELTA2, VERUS_R*dMin);
+            else { // normal verus protocol
+	            if (dMaxLast/dMin > VERUS_R) {
+	         	    if (!exitSlowStart) {
+		         	    dEst = fmax (dMin, (dEst-DELTA2));
+
+		                if (dEst == dMin && wCrt < 2) {
+		                    dMin += 10;
+		                }
+		                else if (dEst == dMin)
+		                	dMinStop=true;
+	         	    }
+	            }
+	            else if (deltaDBar > 0.0001)
+	            	dEst = fmax (dMin, (dEst-DELTA1));
+	            else
+	            	dEst += DELTA2;
+	            	//dEst = fmin (dEst+DELTA2, VERUS_R*dMin);
+	        }
 
             wBarTemp = calcDelayCurve (dEst);
 
