@@ -2,7 +2,7 @@
 
 int len_inet;                // length
 int s,err;
- 
+
 char* port;
 char* srvr_addr;
 unsigned int delay = 0;
@@ -135,7 +135,7 @@ int main(int argc,char **argv) {
     std::cout << "syntax should be ./verus_client <server address> -p <server port> [-d <additional link delay in ms>] \n";
     exit(0);
   }
-  
+
   srvr_addr = argv[1];
 
   while (i != (argc-1)) { // Check that we haven't finished parsing already
@@ -151,9 +151,6 @@ int main(int argc,char **argv) {
       exit(0);
     }
   }
-
-  sprintf (command, "client_%s.out", port);
-  clientLog.open(command);
 
   memset(&adr_srvr,0,sizeof adr_srvr);
 
@@ -202,6 +199,8 @@ int main(int argc,char **argv) {
 
     // stopping the io timer for the timeout
     if (!receivedPkt) {
+      sprintf (command, "client_%s.out", port);
+      clientLog.open(command);
       receivedPkt = true;
       io.stop();
       std::cout << "Connected to server \n";
