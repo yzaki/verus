@@ -15,13 +15,13 @@ double dEst = 0.0;
 int S = 0;
 int ssId = 0;
 double dMin = 1000.0;
-double wList[20000];
+double wList[MAX_W_DELAY_CURVE];
 
 double delay;
-int curveStop = 20000;
+int curveStop = MAX_W_DELAY_CURVE;
 int maxWCurve = 0;
 long long pktSeq = 0;
-unsigned long long seqLast = 1;
+unsigned long long seqLast = 0;
 
 double timeToRun;
 
@@ -43,6 +43,8 @@ pthread_mutex_t missingQueue;
 pthread_t receiver_tid, delayProfile_tid, sending_tid, timeout_tid;
 
 struct sockaddr_in adr_clnt;
+struct sockaddr_in adr_clnt2;
+
 struct timeval startTime;
 struct timeval lastAckTime;
 
@@ -59,7 +61,6 @@ std::map <int, udp_packet_t*> missingsequence_queue;
 std::ofstream receiverLog;
 std::ofstream lossLog;
 std::ofstream verusLog;
-//std::ofstream verusLog2;
 
 // Boost timeout timer
 boost::asio::io_service io;
@@ -199,7 +200,7 @@ void restartSlowStart(void) {
 
     maxWCurve = 0;
     dEst =0.0;
-    seqLast = 1;
+    seqLast = 0;
     wBar =1;
     dTBar = 0.0;
     wCrt = 0;
@@ -230,7 +231,7 @@ void restartSlowStart(void) {
     pthread_mutex_unlock(&missingQueue);
     delaysEpochList.clear();
 
-    for (i=0; i<20000; i++)
+    for (i=0; i<MAX_W_DELAY_CURVE; i++)
         wList[i]=-1;
 
     // sending the first packet for slow start
@@ -247,7 +248,7 @@ double calcDelayCurve (double delay) {
     int w;
 
     pthread_mutex_lock(&lockSPline);
-    for (w=2; w < 20000; w++) {
+    for (w=2; w < MAX_W_DELAY_CURVE; w++) {
         try {
             if (spline1dcalc(spline, w) > delay) {
                 pthread_mutex_unlock(&lockSPline);
@@ -295,10 +296,15 @@ int calcSi (double wBar) {
 
 void* sending_thread (void *arg)
 {
+    int s1;
     int i, ret;
     int sPkts;
     udp_packet_t *pdu;
     //struct timeval currentTime;
+
+    s1 = socket(AF_INET,SOCK_DGRAM,0);
+    if ( s1 == -1 )
+        displayError("socket error()");
 
     while (!terminate) {
         while (tempS > 0) {
@@ -310,7 +316,7 @@ void* sending_thread (void *arg)
                 pdu = udp_pdu_init(pktSeq, MTU, wBar, ssId);
             	//gettimeofday(&currentTime,NULL);
 
-                ret = sendto(s, pdu, MTU, MSG_DONTWAIT, (struct sockaddr *)&adr_clnt, len_inet);
+                ret = sendto(s1, pdu, MTU, MSG_DONTWAIT, (struct sockaddr *)&adr_clnt, len_inet);
 
                 if (ret < 0) {
                 	// if UDP buffer of OS is full, we exit slow start and treat the current packet as lost
@@ -354,7 +360,7 @@ void* sending_thread (void *arg)
                 // sending one new packet -> increase packets in flight
                 wCrt ++;
             }
-            if (tempS > 0)
+            if (tempS > 0 && !slowStart)
             	write2Log (lossLog, "Epoch Error", "couldn't send everything within the epoch. Have more to send", std::to_string(tempS.load()), std::to_string(slowStart), "");
         }
     }
@@ -390,7 +396,7 @@ void* delayProfile_thread (void *arg)
 
             max_i = 1;
             cnt = 0;
-            maxWCurve = 20000;
+            maxWCurve = MAX_W_DELAY_CURVE;
 
             pthread_mutex_lock(&lockWList);
             for (i=1; i<maxWCurve; i++) {
@@ -414,7 +420,7 @@ void* delayProfile_thread (void *arg)
             }
             pthread_mutex_unlock(&lockWList);
 
-            curveStop = 20000;
+            curveStop = MAX_W_DELAY_CURVE;
             maxWCurve = 0;
 
             xi.setcontent(cnt, xs);
@@ -449,17 +455,8 @@ void* delayProfile_thread (void *arg)
 
 void updateUponReceivingPacket (double delay, int w) {
 
-	if (wCrt > 0) // this is a special case where a timeout happend and wCrt is reseted to zero
+	if (wCrt > 0)
     	wCrt --;
-
-    //if (wCrt != 0) // this is a special case where a timeout happend and wCrt is reseted to zero
-    //	wCrt --;
-
-    // packets in flight should never be below zero
-    //if (wCrt < 0){
-    //	std::cout << "Error packets in flight is negative\n";
-    //    exit(1);
-    //}
 
     // processing the delay and updating the verus parameters and the delay curve points
     delaysEpochList.push_back(delay);
@@ -544,6 +541,13 @@ void removeExpiredPacketsFromSeqQueue (struct timeval receivedtime) {
 	        if (slowStart && (int)wBar > 20) {
 	        	curveStop = fmax (100, pdu->w);
 	            slowStart = false;
+
+	         	wCrt = 0;
+	         	pthread_mutex_lock(&lockSendingList);
+	         	seqLast = sendingList.rbegin()->first;
+	         	pthread_mutex_unlock(&lockSendingList);
+
+                missingsequence_queue.clear();
 	            write2Log (lossLog, "Exit slow start", "lost a packet with wBar ", std::to_string(wBar), "", "");
 	        }
         }
@@ -559,7 +563,10 @@ void removeExpiredPacketsFromSeqQueue (struct timeval receivedtime) {
         pthread_mutex_unlock(&lockSendingList);
 
         free(pdu);
-        wCrt--;
+
+        if (wCrt > 0)
+            wCrt--;
+
         missingsequence_delay = 0;
 
         if (missingsequence_queue.size() > 0) {
@@ -589,7 +596,7 @@ void* receiver_thread (void *arg)
 
     while (!terminate) {
 
-        if (recvfrom(s, pdu, sizeof(udp_packet_t), 0, (struct sockaddr *)&adr_clnt, &len_inet) < 0)
+        if (recvfrom(s, pdu, sizeof(udp_packet_t), 0, (struct sockaddr *)&adr_clnt2, &len_inet) < 0)
         	displayError("Receiver thread error");
 
         pthread_mutex_lock(&restartLock);
@@ -666,7 +673,7 @@ void* receiver_thread (void *arg)
         if(slowStart) {
             // since we received an ACK we can increase the sending window by 1 packet according to slow start
             wBar ++;
-            tempS += wBar-wCrt;  // let the sending thread start sending the new packets
+            tempS += fmax(0, wBar-wCrt);   // let the sending thread start sending the new packets
         }
     	pthread_mutex_unlock(&restartLock);
 	}
@@ -706,7 +713,7 @@ int main(int argc,char **argv) {
     sa.sa_flags   = SA_SIGINFO;
     sigaction(SIGSEGV, &sa, NULL);
 
-    for (int j=0; j<20000; j++)
+    for (int j=0; j<MAX_W_DELAY_CURVE; j++)
         wList[j]=-1;
 
     if (argc < 7) {
@@ -821,29 +828,22 @@ int main(int argc,char **argv) {
 
             deltaDBar = dMax - dMaxLast;
 
-            //write2Log (verusLog2, std::to_string(dMax), std::to_string(dMaxLast), std::to_string(deltaDBar), "", "");
+            // normal verus protocol
+            if (dMaxLast/dMin > VERUS_R) {
+         	    if (!exitSlowStart) {
+	         	    dEst = fmax (dMin, (dEst-DELTA2));
 
-            // to deal with networks with RTT smaller than 20ms
-            if (dMaxLast < 20)
+	                if (dEst == dMin && wCrt < 2) {
+	                    dMin += 10;
+	                }
+	                else if (dEst == dMin)
+	                	dMinStop=true;
+         	    }
+            }
+            else if (deltaDBar > 0.0001)
+            	dEst = fmax (dMin, (dEst-DELTA1));
+            else
             	dEst += DELTA2;
-            else { // normal verus protocol
-	            if (dMaxLast/dMin > VERUS_R) {
-	         	    if (!exitSlowStart) {
-		         	    dEst = fmax (dMin, (dEst-DELTA2));
-
-		                if (dEst == dMin && wCrt < 2) {
-		                    dMin += 10;
-		                }
-		                else if (dEst == dMin)
-		                	dMinStop=true;
-	         	    }
-	            }
-	            else if (deltaDBar > 0.0001)
-	            	dEst = fmax (dMin, (dEst-DELTA1));
-	            else
-	            	dEst += DELTA2;
-	            	//dEst = fmin (dEst+DELTA2, VERUS_R*dMin);
-	        }
 
             wBarTemp = calcDelayCurve (dEst);
 
@@ -861,7 +861,7 @@ int main(int argc,char **argv) {
             if (!dMinStop)
             	tempS += S;
 
-            write2Log (verusLog, std::to_string(dEst), std::to_string(dMin), std::to_string(wCrt), std::to_string(wBar), std::to_string(S));
+            write2Log (verusLog, std::to_string(dEst), std::to_string(dMin), std::to_string(wCrt), std::to_string(wBar), std::to_string(tempS));
         }
         usleep (EPOCH);
     }

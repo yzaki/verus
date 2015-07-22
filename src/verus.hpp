@@ -40,12 +40,13 @@
 #define  EPOCH 5e3 // Verus epoch in microseconds
 #define  DELTA1 1.0 // delta decrease
 #define  DELTA2 2.0 // delta increase
-#define  VERUS_R 2.0 // verus ratio of Dmax/Dmin
+#define  VERUS_R 6.0 // verus ratio of Dmax/Dmin
 #define	 SS_EXIT_THRESHOLD 500.0
 #define  SS_INIT_TIMEOUT 1000.0
 #define  MAX_TIMEOUT 1000.0
 #define  MIN_TIMEOUT 150.0
 #define  MISSING_PKT_EXPIRY 150.0
+#define  MAX_W_DELAY_CURVE 40000
 
 using namespace alglib;
 
