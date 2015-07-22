@@ -247,26 +247,51 @@ void restartSlowStart(void) {
 double calcDelayCurve (double delay) {
     int w;
 
-    pthread_mutex_lock(&lockSPline);
     for (w=2; w < MAX_W_DELAY_CURVE; w++) {
-        try {
-            if (spline1dcalc(spline, w) > delay) {
-                pthread_mutex_unlock(&lockSPline);
+        if (!haveSpline) {
+            pthread_mutex_lock(&lockWList);
+            if (wList[w] > delay) {
+                pthread_mutex_unlock(&lockWList);
                 return (w-1);
             }
+            pthread_mutex_unlock(&lockWList);
         }
-        catch (alglib::ap_error exc) {
-        	std::cout << "alglib1 " << exc.msg.c_str() << "\n";
-            write2Log (lossLog, "CalcDelayCurve error", exc.msg.c_str(), "", "", "");
+        else {
+            pthread_mutex_lock(&lockSPline);
+            try {
+                if (spline1dcalc(spline, w) > delay) {
+                    pthread_mutex_unlock(&lockSPline);
+                    return (w-1);
+                }
+            }
+            catch (alglib::ap_error exc) {
+                std::cout << "alglib1 " << exc.msg.c_str() << "\n";
+                write2Log (lossLog, "CalcDelayCurve error", exc.msg.c_str(), "", "", "");
+            }
+            pthread_mutex_unlock(&lockSPline);
         }
     }
-    pthread_mutex_unlock(&lockSPline);
 
-    return -1000.0;
+    if (!haveSpline)
+        return 1.0; // special case: when verus starts working and we dont have a curve
+                    // here we reached the max W and did not find a match, we return a w of 1
+    else
+        return -1000.0;
 }
 
 double calcDelayCurveInv (double w) {
     double ret;
+
+    if (!haveSpline) {
+        if (w < MAX_W_DELAY_CURVE) {
+            pthread_mutex_lock(&lockWList);
+            ret = wList[(int)w];
+            pthread_mutex_unlock(&lockWList);
+            return ret;
+        }
+        else
+            return wList[MAX_W_DELAY_CURVE];
+    }
 
     pthread_mutex_lock(&lockSPline);
     try{
@@ -809,7 +834,7 @@ int main(int argc,char **argv) {
         pthread_mutex_unlock(&missingQueue);
 
         // waiting for slow start to finish to start sending data
-        if (haveSpline) {
+        if (!slowStart) {
             dMinStop=false;
 
             // -------------- Verus sender ------------------
