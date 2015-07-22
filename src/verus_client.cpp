@@ -1,15 +1,31 @@
 #include "verus.hpp"
 
 int len_inet;                // length
-int s,err;                       // Socket
+int s,err;
+
+char* port;
+char* srvr_addr;
+unsigned int delay = 0;
 
 bool receivedPkt = false;
+bool terminate = false;
 
-char* srvr_addr;
-struct sockaddr_in adr_srvr; // AF_INET
-struct sockaddr_in adr;      // AF_INET
+struct sockaddr_in adr_srvr;
+struct sockaddr_in adr_srvr2;
+struct sockaddr_in adr;
 
 pthread_t timeout_tid;
+pthread_t sending_tid;
+
+typedef struct {
+  udp_packet_t *pdu;
+  long long seconds;
+  long long millis;
+} sendPkt;
+
+std::vector<sendPkt*> sendingList;
+pthread_mutex_t lockSendingList;
+
 boost::asio::io_service io;
 boost::asio::deadline_timer timer (io, boost::posix_time::milliseconds(SS_INIT_TIMEOUT));
 
@@ -26,15 +42,68 @@ void TimeoutHandler( const boost::system::error_code& e) {
 
     if (e) return;
 
-    z = sendto(s,"Hallo", strlen("Hallo"), 0, (struct sockaddr *)&adr_srvr, len_inet);
+    z = sendto(s,"Hallo", strlen("Hallo"), 0, (struct sockaddr *)&adr_srvr2, len_inet);
     if ( z < 0 )
-      displayError("sendto(2)");
+      displayError("sendto(Hallo)");
 
     //update timer and restart
     timer.expires_from_now (boost::posix_time::milliseconds(1000));
     timer.async_wait(&TimeoutHandler);
 
     return;
+}
+
+void* sending_thread (void *arg)
+{
+  int s1, z;
+  struct timeval timestamp;
+  sendPkt *pkt;
+
+  memset(&adr_srvr,0,sizeof adr_srvr);
+
+  adr_srvr2.sin_family = AF_INET;
+  adr_srvr2.sin_port = htons(atoi(port));
+  adr_srvr2.sin_addr.s_addr =  inet_addr(srvr_addr);
+
+  if ( adr_srvr2.sin_addr.s_addr == INADDR_NONE ) {
+    displayError("bad address.");
+  }
+
+  s1 = socket(AF_INET,SOCK_DGRAM,0);
+  if ( s1 == -1 ) {
+    displayError("socket()");
+  }
+
+  while (!terminate) {
+    gettimeofday(&timestamp,NULL);
+
+    pthread_mutex_lock(&lockSendingList);
+
+    if (sendingList.size() > 0)
+       pkt = * sendingList.begin();
+
+    // since tc qdisc command in Linux seems to have some issues when adding delay, we defer the packet here
+    if (sendingList.size() > 0 && (timestamp.tv_sec-pkt->seconds)*1000.0+(timestamp.tv_usec-pkt->millis)/1000.0 > delay) {
+      // sending ACK
+      z = sendto(s1, pkt->pdu, sizeof(udp_packet_t), 0, (struct sockaddr *)&adr_srvr2, len_inet);
+      free (pkt->pdu);
+
+      if (z < 0)
+        if (errno == ENOBUFS || errno == EAGAIN || errno == EWOULDBLOCK)
+          std::cout << "reached maximum OS UDP buffer size\n";
+        else
+          displayError("sendto(2)");
+
+      sendingList.erase(sendingList.begin());
+      pthread_mutex_unlock(&lockSendingList);
+    }
+    else{
+      pthread_mutex_unlock(&lockSendingList);
+      usleep(0.01);
+    }
+  }
+
+  return NULL;
 }
 
 void* timeout_thread (void *arg)
@@ -50,37 +119,38 @@ void* timeout_thread (void *arg)
 
 int main(int argc,char **argv) {
   int z;
-  int i = 0;
+  int i = 1;
   char command[512];
   char tmp[512];
-  char* port;
-  bool terminate = false;
+
   udp_packet_t *pdu;
+  sendPkt *pkt;
   struct timeval timestamp;
   setbuf(stdout, NULL);
   std::ofstream clientLog;
 
-  if (argc < 5) {
-    std::cout << "syntax should be ./verus_client -ip IP -p PORT \n";
+  pthread_mutex_init(&lockSendingList, NULL);
+
+  if (argc < 4) {
+    std::cout << "syntax should be ./verus_client <server address> -p <server port> [-d <additional link delay in ms>] \n";
     exit(0);
   }
 
+  srvr_addr = argv[1];
+
   while (i != (argc-1)) { // Check that we haven't finished parsing already
     i=i+1;
-    if (!strcmp (argv[i], "-ip")) {
-      i=i+1;
-      srvr_addr = argv[i];
-    } else if (!strcmp (argv[i], "-p")) {
+    if (!strcmp (argv[i], "-p")) {
       i=i+1;
       port = argv[i];
-    } else {
-      std::cout << "syntax should be ./verus_client -ip IP -p PORT \n";
+    } else if (!strcmp (argv[i], "-d")) {
+      i=i+1;
+      delay = atoi(argv[i]);
+    }else {
+      std::cout << "syntax should be ./verus_client <server address> -p <server port> [-d <additional link delay in ms>] \n";
       exit(0);
     }
   }
-
-  sprintf (command, "client_%s.out", port);
-  clientLog.open(command);
 
   memset(&adr_srvr,0,sizeof adr_srvr);
 
@@ -104,15 +174,18 @@ int main(int argc,char **argv) {
   //printf("Sending Hallo to %s:%s\n", srvr_addr, port);
   z = sendto(s,"Hallo", strlen("Hallo"), 0, (struct sockaddr *)&adr_srvr, len_inet);
   if ( z < 0 )
-    displayError("sendto(2)");
+    displayError("sendto(Hallo)");
 
   if (pthread_create(&(timeout_tid), NULL, &timeout_thread, NULL) != 0)
       std::cout << "can't create thread: " <<  strerror(err) << "\n";
 
-  pdu = (udp_packet_t *) malloc(sizeof(udp_packet_t));
+  if (pthread_create(&(sending_tid), NULL, &sending_thread, NULL) != 0)
+      std::cout << "can't create thread: " <<  strerror(err) << "\n";
+
 
   // starting to loop waiting to receive data and to ACK
   while(!terminate) {
+    pdu = (udp_packet_t *) malloc(sizeof(udp_packet_t));
 
     socklen_t len = sizeof(struct sockaddr_in);
     z = recvfrom(s, pdu, sizeof(udp_packet_t), 0, (struct sockaddr *)&adr, &len);
@@ -126,6 +199,8 @@ int main(int argc,char **argv) {
 
     // stopping the io timer for the timeout
     if (!receivedPkt) {
+      sprintf (command, "client_%s.out", port);
+      clientLog.open(command);
       receivedPkt = true;
       io.stop();
       std::cout << "Connected to server \n";
@@ -135,10 +210,15 @@ int main(int argc,char **argv) {
     sprintf(tmp, "%ld.%06d, %llu\n", timestamp.tv_sec, timestamp.tv_usec, pdu->seq);
     clientLog << tmp;
 
-    // sending ACK
-    z = sendto(s, pdu, sizeof(udp_packet_t), 0, (struct sockaddr *)&adr_srvr, len_inet);
-    if ( z < 0 )
-      displayError("sendto(2)");
+    pkt = (sendPkt *) malloc(sizeof(sendPkt));
+    pkt->pdu = pdu;
+    pkt->seconds = timestamp.tv_sec;
+    pkt->millis = timestamp.tv_usec;
+
+    pthread_mutex_lock(&lockSendingList);
+    sendingList.push_back(pkt);
+    pthread_mutex_unlock(&lockSendingList);
+
   }
 
   std::cout << "Client exiting \n";
