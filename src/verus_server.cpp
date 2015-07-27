@@ -54,7 +54,7 @@ spline1dinterpolant spline;
 std::atomic<long long> wCrt(0);
 std::atomic<long long> tempS(0);
 std::vector<double> delaysEpochList;
-std::map <int, long long> sendingList;
+std::map <unsigned long long, long long> sendingList;
 std::map <int, udp_packet_t*> missingsequence_queue;
 
 // output files
@@ -89,10 +89,10 @@ static void displayError(const char *on_what) {
 }
 
 void write2Log (std::ofstream &logFile, std::string arg1, std::string arg2, std::string arg3, std::string arg4, std::string arg5) {
-  	double relativeTime;
-  	struct timeval currentTime;
+  double relativeTime;
+  struct timeval currentTime;
 
-  	gettimeofday(&currentTime,NULL);
+  gettimeofday(&currentTime,NULL);
     relativeTime = (currentTime.tv_sec-startTime.tv_sec)+(currentTime.tv_usec-startTime.tv_usec)/1000000.0;
 
     logFile << relativeTime << "," << arg1;
@@ -112,37 +112,37 @@ void write2Log (std::ofstream &logFile, std::string arg1, std::string arg2, std:
 }
 
 double ewma (double vals, double delay, double alpha) {
-  	double avg;
+    double avg;
 
-  	// checking if the value is negative, meanning it has not been udpated
-  	if (vals < 0)
-    	avg = delay;
-  	else
-    	avg = vals * alpha + (1-alpha) * delay;
+    // checking if the value is negative, meanning it has not been udpated
+    if (vals < 0)
+        avg = delay;
+    else
+        avg = vals * alpha + (1-alpha) * delay;
 
-  	return avg;
+    return avg;
 }
 
 udp_packet_t *
 udp_pdu_init(int seq, unsigned int packetSize, int w, int ssId) {
-  	udp_packet_t *pdu;
-  	struct timeval timestamp;
+    udp_packet_t *pdu;
+    struct timeval timestamp;
 
-  	if (packetSize <= sizeof(udp_packet_t)) {
-      	printf("defined packet size is smaller than headers");
-      	exit(0);
+    if (packetSize <= sizeof(udp_packet_t)) {
+        printf("defined packet size is smaller than headers");
+        exit(0);
     }
 
-  	pdu = (udp_packet_t*)malloc(packetSize);
+    pdu = (udp_packet_t*)malloc(packetSize);
 
-  	if (pdu) {
-    	pdu->seq = seq;
-    	pdu->w = w;
-	    pdu->ss_id = ssId;
-	    gettimeofday(&timestamp,NULL);
-	    pdu->seconds = timestamp.tv_sec;
-	    pdu->millis = timestamp.tv_usec;
-	}
+    if (pdu) {
+        pdu->seq = seq;
+        pdu->w = w;
+        pdu->ss_id = ssId;
+        gettimeofday(&timestamp,NULL);
+        pdu->seconds = timestamp.tv_sec;
+        pdu->millis = timestamp.tv_usec;
+    }
   return pdu;
 }
 
@@ -172,11 +172,11 @@ void TimeoutHandler( const boost::system::error_code& e) {
 
         pthread_mutex_lock(&lockSendingList);
         if (sendingList.size() > 0) {
-        	write2Log (lossLog, "clearing sending list because of timeout", "", "", "", "");
-        	seqLast = sendingList.rbegin()->first;
-        	sendingList.clear();
+            write2Log (lossLog, "clearing sending list because of timeout", "", "", "", "");
+            seqLast = sendingList.rbegin()->first;
+            sendingList.clear();
         }
-	    pthread_mutex_unlock(&lockSendingList);
+        pthread_mutex_unlock(&lockSendingList);
 
         // resetting the missingsequence queue
         pthread_mutex_lock(&missingQueue);
@@ -185,7 +185,7 @@ void TimeoutHandler( const boost::system::error_code& e) {
     }
 
     //update timer and restart
-    timeouttimer=fmin (MAX_TIMEOUT, fmax((3*delay), MIN_TIMEOUT));
+    timeouttimer=fmin (MAX_TIMEOUT, fmax((5*delay), MIN_TIMEOUT));
     timer.expires_from_now (boost::posix_time::milliseconds(timeouttimer));
     timer.async_wait(&TimeoutHandler);
 
@@ -215,9 +215,9 @@ void restartSlowStart(void) {
     haveSpline = false;
 
     // stop the delay profile curve thread and restart it
-	pthread_cancel(delayProfile_tid);
+    pthread_cancel(delayProfile_tid);
     if (pthread_create(&(delayProfile_tid), NULL, &delayProfile_thread, NULL) != 0)
-    	std::cout << "can't create thread: " <<  strerror(err) << "\n";
+        std::cout << "can't create thread: " <<  strerror(err) << "\n";
 
     // increase slow start session ID
     ssId ++;
@@ -273,8 +273,7 @@ double calcDelayCurve (double delay) {
     }
 
     if (!haveSpline)
-        return 1.0; // special case: when verus starts working and we dont have a curve
-                    // here we reached the max W and did not find a match, we return a w of 1
+        return calcDelayCurve(delay-DELTA2); // special case: when verus starts working and we don't have a curve.
     else
         return -1000.0;
 }
@@ -298,7 +297,7 @@ double calcDelayCurveInv (double w) {
         ret = spline1dcalc(spline, w);
     }
     catch (alglib::ap_error exc) {
-    	std::cout << "alglib2 " << exc.msg.c_str() << "\n";
+        std::cout << "alglib2 " << exc.msg.c_str() << "\n";
         write2Log (lossLog, "Alglib error", exc.msg.c_str(), std::to_string(w), "", "");
     }
     pthread_mutex_unlock(&lockSPline);
@@ -312,9 +311,9 @@ int calcSi (double wBar) {
     n = (int) ceil(dTBar/(EPOCH/1000.0));
 
     if (n > 1)
-    	S = (int) fmax (0, (wBar+wCrt*(2-n)/(n-1)));
+        S = (int) fmax (0, (wBar+wCrt*(2-n)/(n-1)));
     else
-    	S = (int) fmax (0, (wBar - wCrt));
+        S = (int) fmax (0, (wBar - wCrt));
 
     return S;
 }
@@ -339,54 +338,54 @@ void* sending_thread (void *arg)
             for (i=0; i<sPkts; i++) {
                 pktSeq ++;
                 pdu = udp_pdu_init(pktSeq, MTU, wBar, ssId);
-            	//gettimeofday(&currentTime,NULL);
+                //gettimeofday(&currentTime,NULL);
 
                 ret = sendto(s1, pdu, MTU, MSG_DONTWAIT, (struct sockaddr *)&adr_clnt, len_inet);
 
                 if (ret < 0) {
-                	// if UDP buffer of OS is full, we exit slow start and treat the current packet as lost
-                	if (errno == ENOBUFS || errno == EAGAIN || errno == EWOULDBLOCK) {
-                		if (slowStart) {
-                			lossPhase = true;
-                			exitSlowStart = true;
-		                    wBar = 0.49 * pdu->w; // this is so that we dont switch exitslowstart until we receive packets that are not from slow start
-		                    dEst = 0.75*dMin*VERUS_R; // setting dEst to half of the allowed maximum delay, for effeciency purposes
-		                    slowStart = false;
+                    // if UDP buffer of OS is full, we exit slow start and treat the current packet as lost
+                    if (errno == ENOBUFS || errno == EAGAIN || errno == EWOULDBLOCK) {
+                        if (slowStart) {
+                            lossPhase = true;
+                            exitSlowStart = true;
+                            wBar = 0.49 * pdu->w; // this is so that we dont switch exitslowstart until we receive packets that are not from slow start
+                            dEst = 0.75*dMin*VERUS_R; // setting dEst to half of the allowed maximum delay, for effeciency purposes
+                            slowStart = false;
 
-		                    // this packet was not sent we should decrease the packet seq number and free the pdu
-		                    pktSeq --;
-		                    free(pdu);
+                            // this packet was not sent we should decrease the packet seq number and free the pdu
+                            pktSeq --;
+                            free(pdu);
 
-		                    write2Log (lossLog, "Exit slow start", "reached maximum OS UDP buffer size", std::to_string(wCrt), "", "");
-		                    break;
-                		}
-                		else {
-                			// this is normal sending, OS UDP buffer is full, discard this packet and treat as lost
-							wBar = fmax(1.0, VERUS_M_DECREASE * wBar);
-					        dEst = calcDelayCurveInv (wBar);
+                            write2Log (lossLog, "Exit slow start", "reached maximum OS UDP buffer size", std::to_string(wCrt), "", "");
+                            break;
+                        }
+                        else {
+                            // this is normal sending, OS UDP buffer is full, discard this packet and treat as lost
+                            wBar = fmax(1.0, VERUS_M_DECREASE * wBar);
+                            dEst = calcDelayCurveInv (wBar);
 
-					        // this packet was not sent we should decrease the packet seq number and free the pdu
-		                    pktSeq --;
-		                    free(pdu);
+                            // this packet was not sent we should decrease the packet seq number and free the pdu
+                            pktSeq --;
+                            free(pdu);
 
-		                    write2Log (lossLog, "Loss", "reached maximum OS UDP buffer size", std::to_string(errno), "", "");
-		                    break;
-                		}
-	                }
-	                else
-	                	displayError("sendto(2)");
-	            }
-	            // storing sending packet info in sending list with sending time
-	            pthread_mutex_lock(&lockSendingList);
-	            sendingList[pdu->seq]=pdu->w;
-	            pthread_mutex_unlock(&lockSendingList);
-	            free (pdu);
+                            write2Log (lossLog, "Loss", "reached maximum OS UDP buffer size", std::to_string(errno), "", "");
+                            break;
+                        }
+                    }
+                    else
+                        displayError("sendto(2)");
+                }
+                // storing sending packet info in sending list with sending time
+                pthread_mutex_lock(&lockSendingList);
+                sendingList[pdu->seq]=pdu->w;
+                pthread_mutex_unlock(&lockSendingList);
+                free (pdu);
 
                 // sending one new packet -> increase packets in flight
                 wCrt ++;
             }
             if (tempS > 0 && !slowStart)
-            	write2Log (lossLog, "Epoch Error", "couldn't send everything within the epoch. Have more to send", std::to_string(tempS.load()), std::to_string(slowStart), "");
+                write2Log (lossLog, "Epoch Error", "couldn't send everything within the epoch. Have more to send", std::to_string(tempS.load()), std::to_string(slowStart), "");
         }
     }
     return NULL;
@@ -399,6 +398,7 @@ void* delayProfile_thread (void *arg)
     std::vector<double> y;
 
     int max_i;
+    double N = 15.0;
     int cnt;
     double* xs = NULL;
     double* ys = NULL;
@@ -451,27 +451,31 @@ void* delayProfile_thread (void *arg)
             xi.setcontent(cnt, xs);
             yi.setcontent(cnt, ys);
 
-            if (max_i/15.0 < 4) { // alglib spline1dfitpenalized expects M to be bigger than 4
-            	write2Log (lossLog, "Restart", "Alglib M<4!", "", "", "");
-            	restartSlowStart();
+            while (max_i/N < 5) {
+                N--;
+                if (N < 1) {
+                    write2Log (lossLog, "Restart", "Alglib M<4!", "", "", "","","","","");
+                    restartSlowStart();
+                    break;
+                }
             }
-            else {
-	            try {
-	            	// if alglib takes long time to compute, we can use the previous spline in other threads
-	            	spline1dfitpenalized(xi, yi, max_i/15.0, 2.0, info, splineTemp, rep);
+            if (max_i/N > 4) {
+                try {
+                    // if alglib takes long time to compute, we can use the previous spline in other threads
+                    spline1dfitpenalized(xi, yi, max_i/N, 2.0, info, splineTemp, rep);
 
-	                // copy newly calculated splinetemp to update spline
-	                pthread_mutex_lock(&lockSPline);
-	                spline=splineTemp;
-	                pthread_mutex_unlock(&lockSPline);
+                    // copy newly calculated splinetemp to update spline
+                    pthread_mutex_lock(&lockSPline);
+                    spline=splineTemp;
+                    pthread_mutex_unlock(&lockSPline);
 
-	                haveSpline = true;
-	            }
-	            catch (alglib::ap_error exc) {
-	                write2Log (lossLog, "Restart", "Spline exception", exc.msg.c_str(), "", "");
-	                restartSlowStart();
-	            }
-	        }
+                    haveSpline = true;
+                }
+                catch (alglib::ap_error exc) {
+                    write2Log (lossLog, "Restart", "Spline exception", exc.msg.c_str(), "", "");
+                    restartSlowStart();
+                }
+            }
             usleep (CURVE_TIMER);
         }
     }
@@ -480,8 +484,8 @@ void* delayProfile_thread (void *arg)
 
 void updateUponReceivingPacket (double delay, int w) {
 
-	if (wCrt > 0)
-    	wCrt --;
+    if (wCrt > 0)
+        wCrt --;
 
     // processing the delay and updating the verus parameters and the delay curve points
     delaysEpochList.push_back(delay);
@@ -489,7 +493,7 @@ void updateUponReceivingPacket (double delay, int w) {
 
     // updating the minimum delay
     if (delay < dMin)
-    	dMin = delay;
+        dMin = delay;
 
     // not to update the wList with any values that comes within the loss phase
     if (!lossPhase) {
@@ -498,13 +502,13 @@ void updateUponReceivingPacket (double delay, int w) {
         pthread_mutex_unlock(&lockWList);
 
         if (maxWCurve < w)
-        	maxWCurve = w;
+            maxWCurve = w;
     }
     else {    // still in loss phase, received an ACK, do similar to congestion avoidance
         wBar += 1.0/wBar;
 
         if(haveSpline)
-        	dEst = fmin (dEst, calcDelayCurveInv (wBar));
+            dEst = fmin (dEst, calcDelayCurveInv (wBar));
     }
     return;
 }
@@ -545,45 +549,45 @@ void removeExpiredPacketsFromSeqQueue (struct timeval receivedtime) {
         if (!timerExpiry) {
             timerExpiry = true;
 
-	        if (!lossPhase) { // if its a new loss phase then we do multiplicative decrease, otherwise it belonges to the same loss phase
-	            lossPhase = true;
+            if (!lossPhase) { // if its a new loss phase then we do multiplicative decrease, otherwise it belonges to the same loss phase
+                lossPhase = true;
 
-	            write2Log (lossLog, "Missing packet expired", std::to_string(pdu->seq), "", "", ""); // we are only recordering the first missing packet expiry per loss phase
+                write2Log (lossLog, "Missing packet expired", std::to_string(pdu->seq), "", "", ""); // we are only recordering the first missing packet expiry per loss phase
 
-	            // get the w of the lost packet and do multiplicative decrease
-	            wBar = fmin( wBar, VERUS_M_DECREASE * pdu->w);
+                // get the w of the lost packet and do multiplicative decrease
+                wBar = fmin( wBar, VERUS_M_DECREASE * pdu->w);
 
-	            if (slowStart){
-	                pthread_mutex_lock(&lockWList);
-	                dEst = wList[(int)wBar];
-	                pthread_mutex_unlock(&lockWList);
-	            }
-	            else
-	            	dEst = calcDelayCurveInv (wBar);
-	        }
+                if (slowStart){
+                    pthread_mutex_lock(&lockWList);
+                    dEst = wList[(int)wBar];
+                    pthread_mutex_unlock(&lockWList);
+                }
+                else
+                    dEst = calcDelayCurveInv (wBar);
+            }
 
-	        // We encountered packet losses, exit slow start
-	        if (slowStart && (int)wBar > 20) {
-	        	curveStop = fmax (100, pdu->w);
-	            slowStart = false;
+            // We encountered packet losses, exit slow start
+            if (slowStart && (int)wBar > 20) {
+                curveStop = fmax (100, pdu->w);
+                slowStart = false;
 
-	         	wCrt = 0;
-	         	pthread_mutex_lock(&lockSendingList);
-	         	seqLast = sendingList.rbegin()->first;
-	         	pthread_mutex_unlock(&lockSendingList);
+                wCrt = 0;
+                pthread_mutex_lock(&lockSendingList);
+                seqLast = sendingList.rbegin()->first;
+                pthread_mutex_unlock(&lockSendingList);
 
                 missingsequence_queue.clear();
-	            write2Log (lossLog, "Exit slow start", "lost a packet with wBar ", std::to_string(wBar), "", "");
-	        }
+            write2Log (lossLog, "Exit slow start", "lost a packet with wBar ", std::to_string(wBar), "", "");
+            }
         }
         // erase the pdu from the missing queue as well as from the sendinglist
         if (missingsequence_queue.find(pdu->seq) != missingsequence_queue.end()) {
-        	missingsequence_queue.erase(pdu->seq);
+            missingsequence_queue.erase(pdu->seq);
         }
 
         pthread_mutex_lock(&lockSendingList);
         if (sendingList.find(pdu->seq) != sendingList.end()) {
-        	sendingList.erase(pdu->seq);
+            sendingList.erase(pdu->seq);
         }
         pthread_mutex_unlock(&lockSendingList);
 
@@ -622,7 +626,7 @@ void* receiver_thread (void *arg)
     while (!terminate) {
 
         if (recvfrom(s, pdu, sizeof(udp_packet_t), 0, (struct sockaddr *)&adr_clnt2, &len_inet) < 0)
-        	displayError("Receiver thread error");
+            displayError("Receiver thread error");
 
         pthread_mutex_lock(&restartLock);
 
@@ -638,15 +642,15 @@ void* receiver_thread (void *arg)
         if (slowStart && delay > SS_EXIT_THRESHOLD) { // if the current delay exceeds half a second during slow start we should time out and exit slow start
             wBar = VERUS_M_DECREASE * pdu->w;
             dEst = 0.75 * dMin * VERUS_R; // setting dEst to half of the allowed maximum delay, for effeciency purposes
-			lossPhase = true;
-			slowStart = false;
+            lossPhase = true;
+            slowStart = false;
             exitSlowStart = true;
 
             write2Log (lossLog, "Exit slow start", "exceeding SS_EXIT_THRESHOLD", "", "", "");
         }
 
         //update timer and restart
-        timeouttimer=fmin (MAX_TIMEOUT, fmax((3*delay), MIN_TIMEOUT));
+        timeouttimer=fmin (MAX_TIMEOUT, fmax((5*delay), MIN_TIMEOUT));
         timer.expires_from_now (boost::posix_time::milliseconds(timeouttimer));
         timer.async_wait(&TimeoutHandler);
 
@@ -667,11 +671,11 @@ void* receiver_thread (void *arg)
             // received a packet with seq number smaller than the anticipated one (out of order). Need to check if that packet is there in the missing queue
             pthread_mutex_lock(&missingQueue);
             if (missingsequence_queue.find(pdu->seq) != missingsequence_queue.end()) {
-            	missingsequence_queue.erase(pdu->seq);
-            	updateUponReceivingPacket (delay, pdu->w);
+                missingsequence_queue.erase(pdu->seq);
+                updateUponReceivingPacket (delay, pdu->w);
             }
             else
-            	write2Log (lossLog, "Received an expired out of sequence packet ", std::to_string(pdu->seq), std::to_string(seqLast), "", "");
+                write2Log (lossLog, "Received an expired out of sequence packet ", std::to_string(pdu->seq), std::to_string(seqLast), "", "");
             pthread_mutex_unlock(&missingQueue);
         }
         else { // creating an out of sequence packet and inserting it to the out of sequence queue
@@ -683,16 +687,16 @@ void* receiver_thread (void *arg)
         // setting the last received sequence number to the current received one for next packet arrival processing
         // making sure we dont take out of order packet
         if (pdu->seq >= seqLast+1 && pdu->ss_id == ssId) {
-        	seqLast = pdu->seq;
-        	gettimeofday(&lastAckTime,NULL);
+            seqLast = pdu->seq;
+            gettimeofday(&lastAckTime,NULL);
         }
 
         // freeing that received pdu from the sendinglist map
-       	pthread_mutex_lock(&lockSendingList);
+        pthread_mutex_lock(&lockSendingList);
         if (sendingList.find(pdu->seq) != sendingList.end()) {
-        	sendingList.erase(pdu->seq);
+            sendingList.erase(pdu->seq);
         }
-       	pthread_mutex_unlock(&lockSendingList);
+        pthread_mutex_unlock(&lockSendingList);
 
         // ------------------ verus slow start ------------------
         if(slowStart) {
@@ -700,20 +704,20 @@ void* receiver_thread (void *arg)
             wBar ++;
             tempS += fmax(0, wBar-wCrt);   // let the sending thread start sending the new packets
         }
-    	pthread_mutex_unlock(&restartLock);
-	}
-	return NULL;
+        pthread_mutex_unlock(&restartLock);
+    }
+    return NULL;
 }
 
 void* timeout_thread (void *arg)
 {
     boost::asio::io_service::work work(io);
 
-	timer.expires_from_now (boost::posix_time::milliseconds(SS_INIT_TIMEOUT));
-	timer.async_wait(&TimeoutHandler);
-	io.run();
+    timer.expires_from_now (boost::posix_time::milliseconds(SS_INIT_TIMEOUT));
+    timer.async_wait(&TimeoutHandler);
+    io.run();
 
-	return NULL;
+    return NULL;
 }
 
 int main(int argc,char **argv) {
@@ -768,7 +772,7 @@ int main(int argc,char **argv) {
 
     s = socket(AF_INET,SOCK_DGRAM,0);
     if ( s == -1 )
-    	displayError("socket error()");
+        displayError("socket error()");
 
     memset(&adr_inet,0,sizeof adr_inet);
     adr_inet.sin_family = AF_INET;
@@ -776,27 +780,25 @@ int main(int argc,char **argv) {
     adr_inet.sin_addr.s_addr = INADDR_ANY;
 
     if ( adr_inet.sin_addr.s_addr == INADDR_NONE )
-    	displayError("bad address.");
+        displayError("bad address.");
 
     len_inet = sizeof(struct sockaddr_in);
 
     if (bind (s, (struct sockaddr *)&adr_inet, sizeof(adr_inet)) < 0)
-    	displayError("bind()");
+        displayError("bind()");
 
     std::cout << "Server " << port << " waiting for request\n";
 
     // waiting for initialization packet
     if (recvfrom(s, dgram, sizeof (dgram), 0, (struct sockaddr *)&adr_clnt, &len_inet) < 0)
-    	displayError("recvfrom(2)");
+        displayError("recvfrom(2)");
 
     if (stat (name, &info) != 0) {
-    	sprintf (command, "exec mkdir %s", name);
-	    system(command);
+        sprintf (command, "exec mkdir %s", name);
+        system(command);
     }
     sprintf (command, "%s/Verus.out", name);
     verusLog.open(command);
-    //sprintf (command, "%s/Verus2.out", name);
-    //verusLog2.open(command);
 
     // getting the start time of the program, to make relative timestamps
     gettimeofday(&startTime,NULL);
@@ -809,13 +811,13 @@ int main(int argc,char **argv) {
 
     // starting the threads
     if (pthread_create(&(timeout_tid), NULL, &timeout_thread, NULL) != 0)
-    	std::cout << "can't create thread: " <<  strerror(err) << "\n";
+        std::cout << "can't create thread: " <<  strerror(err) << "\n";
     if (pthread_create(&(receiver_tid), NULL, &receiver_thread, NULL) != 0)
-    	std::cout << "Can't create thread: " << strerror(err);
+        std::cout << "Can't create thread: " << strerror(err);
     if (pthread_create(&(sending_tid), NULL, &sending_thread, NULL) != 0)
-    	std::cout << "Can't create thread: " << strerror(err);
+        std::cout << "Can't create thread: " << strerror(err);
     if (pthread_create(&(delayProfile_tid), NULL, &delayProfile_thread, NULL) != 0)
-    	std::cout << "can't create thread: " <<  strerror(err) << "\n";
+        std::cout << "can't create thread: " <<  strerror(err) << "\n";
 
     // sending the first for slow start
     tempS = 1;
@@ -849,33 +851,33 @@ int main(int argc,char **argv) {
 
             // only first verus epoch, dMaxLast is intialized to -10
             if (dMaxLast == -10)
-            	dMaxLast = dMax;
+                dMaxLast = dMax;
 
             deltaDBar = dMax - dMaxLast;
 
             // normal verus protocol
             if (dMaxLast/dMin > VERUS_R) {
-         	    if (!exitSlowStart) {
-	         	    dEst = fmax (dMin, (dEst-DELTA2));
+                if (!exitSlowStart) {
+                    dEst = fmax (dMin, (dEst-DELTA2));
 
-	                if (dEst == dMin && wCrt < 2) {
-	                    dMin += 10;
-	                }
-	                else if (dEst == dMin)
-	                	dMinStop=true;
-         	    }
+                    if (dEst == dMin && wCrt < 2) {
+                        dMin += 10;
+                    }
+                    else if (dEst == dMin)
+                        dMinStop=true;
+                }
             }
             else if (deltaDBar > 0.0001)
-            	dEst = fmax (dMin, (dEst-DELTA1));
+                dEst = fmax (dMin, (dEst-DELTA1));
             else
-            	dEst += DELTA2;
+                dEst += DELTA2;
 
             wBarTemp = calcDelayCurve (dEst);
 
             if (wBarTemp < 0) {
-            	write2Log (lossLog, "Restart", "can't map delay on delay curve", "", "", "");
-    			restartSlowStart();
-    			continue;
+                write2Log (lossLog, "Restart", "can't map delay on delay curve", "", "", "");
+                restartSlowStart();
+                continue;
             }
 
             wBar = fmax (1.0, wBarTemp);
@@ -884,7 +886,7 @@ int main(int argc,char **argv) {
             dMaxLast = ewma(dMaxLast, dMax, 0.2);
 
             if (!dMinStop)
-            	tempS += S;
+                tempS += S;
 
             write2Log (verusLog, std::to_string(dEst), std::to_string(dMin), std::to_string(wCrt), std::to_string(wBar), std::to_string(tempS));
         }
