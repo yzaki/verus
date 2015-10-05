@@ -456,7 +456,7 @@ void* delayProfile_thread (void *arg)
                 if (N < 1) {
                     write2Log (lossLog, "Restart", "Alglib M<4!", "", "", "");
                     restartSlowStart();
-                    break;
+                    return NULL;
                 }
             }
             if (max_i/N > 4) {
