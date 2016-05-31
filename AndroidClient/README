@@ -1,0 +1,11 @@
+We rewrote verus_client.cpp and verus.hpp in verus project (https://github.com/yzaki/verus)
+with Java language in Android Studio to bring it to all Android devices.
+
+With this program users can directly run verus client to communition with normal verus server to get 
+some test datas whth mobile devices which use cellur network.
+
+You can download source code of VerusAndroid and use Android Studio to imports 'Project' folder.
+Build this program with Android Studio yourself and create app for your Android devices.
+
+In the other hand, we also provide a pre-build version apk file.  
+
