@@ -1,8 +1,8 @@
 #include "verus.hpp"
 
-typedef tbb::concurrent_vector<udp_packet_t*> vec_udp;
+typedef tbb::concurrent_vector<verus_packet*> vec_udp;
 
-int s, err;
+int s, s1, err;
 int port;
 
 double deltaDBar = 1.0;
@@ -54,8 +54,8 @@ spline1dinterpolant spline;
 std::atomic<long long> wCrt(0);
 std::atomic<long long> tempS(0);
 std::vector<double> delaysEpochList;
-std::map <unsigned long long, long long> sendingList;
-std::map <int, udp_packet_t*> missingsequence_queue;
+std::map <int, long long> sendingList;
+std::map <int, verus_packet*> missingsequence_queue;
 
 // output files
 std::ofstream receiverLog;
@@ -123,26 +123,30 @@ double ewma (double vals, double delay, double alpha) {
     return avg;
 }
 
-udp_packet_t *
+verus_packet *
 udp_pdu_init(int seq, unsigned int packetSize, int w, int ssId) {
-    udp_packet_t *pdu;
-    struct timeval timestamp;
+    verus_packet *pdu;
 
-    if (packetSize <= sizeof(udp_packet_t)) {
-        printf("defined packet size is smaller than headers");
+    struct timeval timestamp;
+    
+    // fixme
+    if ((packetSize + sizeof(verus_header)) > MTU) {
+        printf("cannot fit data in pdu");
         exit(0);
     }
-
-    pdu = (udp_packet_t*)malloc(packetSize);
+    
+    pdu = (verus_packet*)malloc(packetSize + sizeof(verus_header));
 
     if (pdu) {
-        pdu->seq = seq;
-        pdu->w = w;
-        pdu->ss_id = ssId;
+        pdu->header.payloadlength = packetSize;
+        pdu->header.seq = seq;
+        pdu->header.w = w;
+        pdu->header.ss_id = ssId;
         gettimeofday(&timestamp,NULL);
-        pdu->seconds = timestamp.tv_sec;
-        pdu->millis = timestamp.tv_usec;
+        pdu->header.seconds = timestamp.tv_sec;
+        pdu->header.millis = timestamp.tv_usec;
     }
+
   return pdu;
 }
 
@@ -185,7 +189,7 @@ void TimeoutHandler( const boost::system::error_code& e) {
     }
 
     //update timer and restart
-    timeouttimer=fmin (MAX_TIMEOUT, fmax((5*delay), MIN_TIMEOUT));
+    timeouttimer=fmin (MAX_TIMEOUT, fmax((3*delay), MIN_TIMEOUT));
     timer.expires_from_now (boost::posix_time::milliseconds(timeouttimer));
     timer.async_wait(&TimeoutHandler);
 
@@ -215,13 +219,13 @@ void restartSlowStart(void) {
     haveSpline = false;
 
     // stop the delay profile curve thread and restart it
-    pthread_cancel(delayProfile_tid);
-    if (pthread_create(&(delayProfile_tid), NULL, &delayProfile_thread, NULL) != 0)
-        std::cout << "can't create thread: " <<  strerror(err) << "\n";
-
+    // pthread_cancel(delayProfile_tid);
+    // if (pthread_create(&(delayProfile_tid), NULL, &delayProfile_thread, NULL) != 0)
+    //         std::cout << "can't create thread: " <<  strerror(err) << "\n";
+	
     // increase slow start session ID
     ssId ++;
-
+    
     // cleaning up
     pthread_mutex_lock(&lockSendingList);
     sendingList.clear();
@@ -273,7 +277,8 @@ double calcDelayCurve (double delay) {
     }
 
     if (!haveSpline)
-        return calcDelayCurve(delay-DELTA2); // special case: when verus starts working and we don't have a curve.
+        return 1.0; // special case: when verus starts working and we dont have a curve
+                    // here we reached the max W and did not find a match, we return a w of 1
     else
         return -1000.0;
 }
@@ -320,15 +325,10 @@ int calcSi (double wBar) {
 
 void* sending_thread (void *arg)
 {
-    int s1;
     int i, ret;
     int sPkts;
-    udp_packet_t *pdu;
+    verus_packet *pdu;
     //struct timeval currentTime;
-
-    s1 = socket(AF_INET,SOCK_DGRAM,0);
-    if ( s1 == -1 )
-        displayError("socket error()");
 
     while (!terminate) {
         while (tempS > 0) {
@@ -337,10 +337,10 @@ void* sending_thread (void *arg)
 
             for (i=0; i<sPkts; i++) {
                 pktSeq ++;
-                pdu = udp_pdu_init(pktSeq, MTU, wBar, ssId);
-                //gettimeofday(&currentTime,NULL);
-
-                ret = sendto(s1, pdu, MTU, MSG_DONTWAIT, (struct sockaddr *)&adr_clnt, len_inet);
+                // FIXME: change packetsize
+                pdu = udp_pdu_init(pktSeq, MTU-sizeof(verus_header), wBar, ssId);
+                // ret = sendto(s1, pdu, MTU, MSG_DONTWAIT, (struct sockaddr *)&adr_clnt, len_inet);
+                ret = sendto(s1, pdu, MTU, 0, (struct sockaddr *)&adr_clnt, len_inet);
 
                 if (ret < 0) {
                     // if UDP buffer of OS is full, we exit slow start and treat the current packet as lost
@@ -348,7 +348,7 @@ void* sending_thread (void *arg)
                         if (slowStart) {
                             lossPhase = true;
                             exitSlowStart = true;
-                            wBar = 0.49 * pdu->w; // this is so that we dont switch exitslowstart until we receive packets that are not from slow start
+                            wBar = 0.49 * pdu->header.w; // this is so that we dont switch exitslowstart until we receive packets that are not from slow start
                             dEst = 0.75*dMin*VERUS_R; // setting dEst to half of the allowed maximum delay, for effeciency purposes
                             slowStart = false;
 
@@ -377,7 +377,7 @@ void* sending_thread (void *arg)
                 }
                 // storing sending packet info in sending list with sending time
                 pthread_mutex_lock(&lockSendingList);
-                sendingList[pdu->seq]=pdu->w;
+                sendingList[pdu->header.seq]=pdu->header.w;
                 pthread_mutex_unlock(&lockSendingList);
                 free (pdu);
 
@@ -410,6 +410,9 @@ void* delayProfile_thread (void *arg)
 
     while (!terminate) {
         if (slowStart){
+            xs = NULL;
+            ys = NULL;
+
             // still in slowstart phase we should not calculate the delay curve
             usleep (1);
         }
@@ -514,17 +517,17 @@ void updateUponReceivingPacket (double delay, int w) {
 }
 
 void createMissingPdu (int i) {
-    udp_packet_t* pdu;
-    pdu = (udp_packet_t *) malloc(sizeof(udp_packet_t));
+    verus_packet* pdu;
+    pdu = (verus_packet *) malloc(sizeof(verus_packet));
     struct timeval currentTime;
 
     gettimeofday(&currentTime,NULL);
-    pdu->seq = i;
-    pdu->seconds = currentTime.tv_sec;
-    pdu->millis = currentTime.tv_usec;
+    pdu->header.seq = i;
+    pdu->header.seconds = currentTime.tv_sec;
+    pdu->header.millis = currentTime.tv_usec;
 
     pthread_mutex_lock(&lockSendingList);
-    pdu->w = sendingList.find(pdu->seq)->second;
+    pdu->header.w = sendingList.find(pdu->header.seq)->second;
     pthread_mutex_unlock(&lockSendingList);
 
     pthread_mutex_lock(&missingQueue);
@@ -536,12 +539,12 @@ void createMissingPdu (int i) {
 
 void removeExpiredPacketsFromSeqQueue (struct timeval receivedtime) {
     bool timerExpiry = false;
-    udp_packet_t* pdu;
+    verus_packet* pdu;
     double missingsequence_delay;
 
     // accessing the first element in the queue to check if its expired
     pdu = missingsequence_queue.begin()->second;
-    missingsequence_delay = (receivedtime.tv_sec-pdu->seconds)*1000.0+(receivedtime.tv_usec-pdu->millis)/1000.0;
+    missingsequence_delay = (receivedtime.tv_sec-pdu->header.seconds)*1000.0+(receivedtime.tv_usec-pdu->header.millis)/1000.0;
 
     while (missingsequence_delay >= MISSING_PKT_EXPIRY) { // missing packet is treated lost after MISSING_PKT_EXPIRY
         // this means that we have identified a packet loss
@@ -552,10 +555,10 @@ void removeExpiredPacketsFromSeqQueue (struct timeval receivedtime) {
             if (!lossPhase) { // if its a new loss phase then we do multiplicative decrease, otherwise it belonges to the same loss phase
                 lossPhase = true;
 
-                write2Log (lossLog, "Missing packet expired", std::to_string(pdu->seq), "", "", ""); // we are only recordering the first missing packet expiry per loss phase
+	            write2Log (lossLog, "Missing packet expired", std::to_string(pdu->header.seq), "", "", ""); // we are only recordering the first missing packet expiry per loss phase
 
-                // get the w of the lost packet and do multiplicative decrease
-                wBar = fmin( wBar, VERUS_M_DECREASE * pdu->w);
+	            // get the w of the lost packet and do multiplicative decrease
+	            wBar = fmin( wBar, VERUS_M_DECREASE * pdu->header.w);
 
                 if (slowStart){
                     pthread_mutex_lock(&lockWList);
@@ -566,10 +569,11 @@ void removeExpiredPacketsFromSeqQueue (struct timeval receivedtime) {
                     dEst = calcDelayCurveInv (wBar);
             }
 
-            // We encountered packet losses, exit slow start
-            if (slowStart && (int)wBar > 20) {
-                curveStop = fmax (100, pdu->w);
-                slowStart = false;
+	        // We encountered packet losses, exit slow start
+	        if (slowStart && (int)wBar > 20) {
+	        	curveStop = fmax (100, pdu->header.w);
+	            slowStart = false;
+                std::cout << "packet loss " <<  "\n"; 
 
                 wCrt = 0;
                 pthread_mutex_lock(&lockSendingList);
@@ -581,13 +585,13 @@ void removeExpiredPacketsFromSeqQueue (struct timeval receivedtime) {
             }
         }
         // erase the pdu from the missing queue as well as from the sendinglist
-        if (missingsequence_queue.find(pdu->seq) != missingsequence_queue.end()) {
-            missingsequence_queue.erase(pdu->seq);
+        if (missingsequence_queue.find(pdu->header.seq) != missingsequence_queue.end()) {
+        	missingsequence_queue.erase(pdu->header.seq);
         }
 
         pthread_mutex_lock(&lockSendingList);
-        if (sendingList.find(pdu->seq) != sendingList.end()) {
-            sendingList.erase(pdu->seq);
+        if (sendingList.find(pdu->header.seq) != sendingList.end()) {
+        	sendingList.erase(pdu->header.seq);
         }
         pthread_mutex_unlock(&lockSendingList);
 
@@ -600,7 +604,7 @@ void removeExpiredPacketsFromSeqQueue (struct timeval receivedtime) {
 
         if (missingsequence_queue.size() > 0) {
             pdu = missingsequence_queue.begin()->second;
-            missingsequence_delay = (receivedtime.tv_sec-pdu->seconds)*1000.0+(receivedtime.tv_usec-pdu->millis)/1000.0;
+            missingsequence_delay = (receivedtime.tv_sec-pdu->header.seconds)*1000.0+(receivedtime.tv_usec-pdu->header.millis)/1000.0;
         }
     }
     return;
@@ -611,7 +615,8 @@ void* receiver_thread (void *arg)
     unsigned int i;
     double timeouttimer=0.0;
     socklen_t len_inet;
-    udp_packet_t *pdu;
+    verus_packet *ack;
+    char buf[sizeof(verus_header)];
     struct timeval receivedtime;
 
     len_inet = sizeof(struct sockaddr_in);
@@ -621,26 +626,34 @@ void* receiver_thread (void *arg)
     sprintf (command, "%s/Receiver.out", name);
     receiverLog.open(command);
 
-    pdu = (udp_packet_t *) malloc(sizeof(udp_packet_t));
+    ack = (verus_packet *) malloc(sizeof(verus_packet));
+
+    int ret;
 
     while (!terminate) {
-
-        if (recvfrom(s, pdu, sizeof(udp_packet_t), 0, (struct sockaddr *)&adr_clnt2, &len_inet) < 0)
-            displayError("Receiver thread error");
-
+        ret = 0;
+        while (ret < sizeof(verus_header)) {
+            ret += recv(s1, &buf[ret], sizeof(verus_header) - ret, 0);
+        }
+        memcpy(ack, buf, sizeof(verus_header));
         pthread_mutex_lock(&restartLock);
 
         // we have started a new SS session, this packet belongs to the old SS session, so we discard it
-        if (pdu->ss_id < ssId) {
+        if (ack->header.ss_id < ssId) {
             pthread_mutex_unlock(&restartLock);
             continue;
         }
 
         gettimeofday(&receivedtime,NULL);
-        delay = (receivedtime.tv_sec-pdu->seconds)*1000.0+(receivedtime.tv_usec-pdu->millis)/1000.0;
+        delay = (receivedtime.tv_sec-ack->header.seconds)*1000.0+(receivedtime.tv_usec-ack->header.millis)/1000.0;
+
+        if (delay > 10000) {
+            std::cout <<"\n" <<ack->header.seconds*1000.0 << " " << ack->header.millis/1000.0 << " " << receivedtime.tv_sec*1000.0 << " " <<receivedtime.tv_usec/1000.0 << " " << ack->header.seq << "\n";
+            std::cout << ret <<" "<< sizeof(verus_header) <<"\n";
+        }
 
         if (slowStart && delay > SS_EXIT_THRESHOLD) { // if the current delay exceeds half a second during slow start we should time out and exit slow start
-            wBar = VERUS_M_DECREASE * pdu->w;
+            wBar = VERUS_M_DECREASE * ack->header.w;
             dEst = 0.75 * dMin * VERUS_R; // setting dEst to half of the allowed maximum delay, for effeciency purposes
             lossPhase = true;
             slowStart = false;
@@ -650,53 +663,53 @@ void* receiver_thread (void *arg)
         }
 
         //update timer and restart
-        timeouttimer=fmin (MAX_TIMEOUT, fmax((5*delay), MIN_TIMEOUT));
+        timeouttimer=fmin (MAX_TIMEOUT, fmax((3*delay), MIN_TIMEOUT));
         timer.expires_from_now (boost::posix_time::milliseconds(timeouttimer));
         timer.async_wait(&TimeoutHandler);
 
-        write2Log (receiverLog, std::to_string(pdu->seq), std::to_string(delay), std::to_string(wCrt), std::to_string(wBar), "");
+        write2Log (receiverLog, std::to_string(ack->header.seq), std::to_string(delay), std::to_string(wCrt), std::to_string(wBar), "");
 
         // exiting the loss phase in case we are receiving new packets ack with w equal or smaller to the new w after the loss
-        if (lossPhase && pdu->w <= wBar) {
+        if (lossPhase && ack->header.w <= wBar) {
             delaysEpochList.clear();
             lossPhase = false;
             exitSlowStart = false;
         }
 
         // Receiving exactly the next sequence number, everything is ok no losses
-        if (pdu->seq == seqLast+1) {
-            updateUponReceivingPacket (delay, pdu->w);
+        if (ack->header.seq == seqLast+1) {
+            updateUponReceivingPacket (delay, ack->header.w);
         }
-        else if (pdu->seq < seqLast) {
+        else if (ack->header.seq < seqLast) {
             // received a packet with seq number smaller than the anticipated one (out of order). Need to check if that packet is there in the missing queue
             pthread_mutex_lock(&missingQueue);
-            if (missingsequence_queue.find(pdu->seq) != missingsequence_queue.end()) {
-                missingsequence_queue.erase(pdu->seq);
-                updateUponReceivingPacket (delay, pdu->w);
+            if (missingsequence_queue.find(ack->header.seq) != missingsequence_queue.end()) {
+            	missingsequence_queue.erase(ack->header.seq);
+            	updateUponReceivingPacket (delay, ack->header.w);
             }
             else
-                write2Log (lossLog, "Received an expired out of sequence packet ", std::to_string(pdu->seq), std::to_string(seqLast), "", "");
+            	write2Log (lossLog, "Received an expired out of sequence packet ", std::to_string(ack->header.seq), std::to_string(seqLast), "", "");
             pthread_mutex_unlock(&missingQueue);
         }
         else { // creating an out of sequence packet and inserting it to the out of sequence queue
-            for (i=seqLast+1; i<pdu->seq; i++)
+            for (i=seqLast+1; i<ack->header.seq; i++)
                 createMissingPdu (i);
-            updateUponReceivingPacket (delay, pdu->w);
+            updateUponReceivingPacket (delay, ack->header.w);
         }
 
         // setting the last received sequence number to the current received one for next packet arrival processing
         // making sure we dont take out of order packet
-        if (pdu->seq >= seqLast+1 && pdu->ss_id == ssId) {
-            seqLast = pdu->seq;
-            gettimeofday(&lastAckTime,NULL);
+        if (ack->header.seq >= seqLast+1 && ack->header.ss_id == ssId) {
+        	seqLast = ack->header.seq;
+        	gettimeofday(&lastAckTime,NULL);
         }
 
         // freeing that received pdu from the sendinglist map
-        pthread_mutex_lock(&lockSendingList);
-        if (sendingList.find(pdu->seq) != sendingList.end()) {
-            sendingList.erase(pdu->seq);
+       	pthread_mutex_lock(&lockSendingList);
+        if (sendingList.find(ack->header.seq) != sendingList.end()) {
+        	sendingList.erase(ack->header.seq);
         }
-        pthread_mutex_unlock(&lockSendingList);
+       	pthread_mutex_unlock(&lockSendingList);
 
         // ------------------ verus slow start ------------------
         if(slowStart) {
@@ -732,7 +745,7 @@ int main(int argc,char **argv) {
 
     struct stat info;
     struct sigaction sa;
-    struct sockaddr_in adr_inet;
+    struct sockaddr_in adr_inet, client;
     struct timeval currentTime;
 
     // catching segmentation faults
@@ -770,9 +783,14 @@ int main(int argc,char **argv) {
         }
     }
 
-    s = socket(AF_INET,SOCK_DGRAM,0);
+    s = socket(AF_INET,SOCK_STREAM,0);
+    
     if ( s == -1 )
-        displayError("socket error()");
+    	displayError("socket error()");
+
+    // int sndbuf = 1000000;
+    // if (setsockopt(s, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) < 0)
+    //     displayError("socket error() set buf");
 
     memset(&adr_inet,0,sizeof adr_inet);
     adr_inet.sin_family = AF_INET;
@@ -784,14 +802,12 @@ int main(int argc,char **argv) {
 
     len_inet = sizeof(struct sockaddr_in);
 
-    if (bind (s, (struct sockaddr *)&adr_inet, sizeof(adr_inet)) < 0)
-        displayError("bind()");
+    bind (s, (struct sockaddr *)&adr_inet, sizeof(adr_inet));
+    listen(s, 5);
 
     std::cout << "Server " << port << " waiting for request\n";
-
-    // waiting for initialization packet
-    if (recvfrom(s, dgram, sizeof (dgram), 0, (struct sockaddr *)&adr_clnt, &len_inet) < 0)
-        displayError("recvfrom(2)");
+    socklen_t size = sizeof(struct sockaddr_in);
+    s1 = accept(s, (struct sockaddr*) &client, &size);
 
     if (stat (name, &info) != 0) {
         sprintf (command, "exec mkdir %s", name);

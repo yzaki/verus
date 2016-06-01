@@ -18,16 +18,13 @@ pthread_t timeout_tid;
 pthread_t sending_tid;
 
 typedef struct {
-  udp_packet_t *pdu;
+  verus_packet *pdu;
   long long seconds;
   long long millis;
 } sendPkt;
 
 std::vector<sendPkt*> sendingList;
 pthread_mutex_t lockSendingList;
-
-boost::asio::io_service io;
-boost::asio::deadline_timer timer (io, boost::posix_time::milliseconds(SS_INIT_TIMEOUT));
 
 static void displayError(const char *on_what) {
   fputs(strerror(errno),stderr);
@@ -37,22 +34,6 @@ static void displayError(const char *on_what) {
   exit(1);
 }
 
-void TimeoutHandler( const boost::system::error_code& e) {
-    int z;
-
-    if (e) return;
-
-    z = sendto(s,"Hallo", strlen("Hallo"), 0, (struct sockaddr *)&adr_srvr2, len_inet);
-    if ( z < 0 )
-      displayError("sendto(Hallo)");
-
-    //update timer and restart
-    timer.expires_from_now (boost::posix_time::milliseconds(1000));
-    timer.async_wait(&TimeoutHandler);
-
-    return;
-}
-
 void* sending_thread (void *arg)
 {
   int s1, z;
@@ -60,19 +41,6 @@ void* sending_thread (void *arg)
   sendPkt *pkt;
 
   memset(&adr_srvr,0,sizeof adr_srvr);
-
-  adr_srvr2.sin_family = AF_INET;
-  adr_srvr2.sin_port = htons(atoi(port));
-  adr_srvr2.sin_addr.s_addr =  inet_addr(srvr_addr);
-
-  if ( adr_srvr2.sin_addr.s_addr == INADDR_NONE ) {
-    displayError("bad address.");
-  }
-
-  s1 = socket(AF_INET,SOCK_DGRAM,0);
-  if ( s1 == -1 ) {
-    displayError("socket()");
-  }
 
   while (!terminate) {
     gettimeofday(&timestamp,NULL);
@@ -85,7 +53,8 @@ void* sending_thread (void *arg)
     // since tc qdisc command in Linux seems to have some issues when adding delay, we defer the packet here
     if (sendingList.size() > 0 && (timestamp.tv_sec-pkt->seconds)*1000.0+(timestamp.tv_usec-pkt->millis)/1000.0 > delay) {
       // sending ACK
-      z = sendto(s1, pkt->pdu, sizeof(udp_packet_t), 0, (struct sockaddr *)&adr_srvr2, len_inet);
+      z = send(s, &pkt->pdu->header, sizeof(verus_header), 0);
+
       free (pkt->pdu);
 
       if (z < 0)
@@ -106,24 +75,16 @@ void* sending_thread (void *arg)
   return NULL;
 }
 
-void* timeout_thread (void *arg)
-{
-  boost::asio::io_service::work work(io);
-
-  timer.expires_from_now (boost::posix_time::milliseconds(SS_INIT_TIMEOUT));
-  timer.async_wait(&TimeoutHandler);
-  io.run();
-
-  return NULL;
-}
-
 int main(int argc,char **argv) {
   int z;
   int i = 1;
   char command[512];
   char tmp[512];
+  char buf[MTU];
 
-  udp_packet_t *pdu;
+  verus_packet *pdu;
+  verus_header header;
+
   sendPkt *pkt;
   struct timeval timestamp;
   setbuf(stdout, NULL);
@@ -152,8 +113,13 @@ int main(int argc,char **argv) {
     }
   }
 
-  memset(&adr_srvr,0,sizeof adr_srvr);
 
+  s = socket(AF_INET,SOCK_STREAM,0);
+  if ( s == -1 ) {
+    displayError("socket()");
+  }
+
+  memset(&adr_srvr,0,sizeof (adr_srvr));
   adr_srvr.sin_family = AF_INET;
   adr_srvr.sin_port = htons(atoi(port));
   adr_srvr.sin_addr.s_addr =  inet_addr(srvr_addr);
@@ -162,37 +128,38 @@ int main(int argc,char **argv) {
     displayError("bad address.");
   }
 
-  len_inet = sizeof adr_srvr;
-
-  s = socket(AF_INET,SOCK_DGRAM,0);
-  if ( s == -1 ) {
-    displayError("socket()");
-  }
-
   std::cout << "Sending request to server \n";
 
-  //printf("Sending Hallo to %s:%s\n", srvr_addr, port);
-  z = sendto(s,"Hallo", strlen("Hallo"), 0, (struct sockaddr *)&adr_srvr, len_inet);
+  z = connect (s, (struct sockaddr *)&adr_srvr, sizeof(adr_srvr));
   if ( z < 0 )
-    displayError("sendto(Hallo)");
-
-  if (pthread_create(&(timeout_tid), NULL, &timeout_thread, NULL) != 0)
-      std::cout << "can't create thread: " <<  strerror(err) << "\n";
+    perror("connect");
 
   if (pthread_create(&(sending_tid), NULL, &sending_thread, NULL) != 0)
       std::cout << "can't create thread: " <<  strerror(err) << "\n";
 
-
   // starting to loop waiting to receive data and to ACK
   while(!terminate) {
-    pdu = (udp_packet_t *) malloc(sizeof(udp_packet_t));
+    pdu = (verus_packet *) malloc(sizeof(verus_packet));
+	socklen_t len = sizeof(struct sockaddr_in);
+    
+    z = 0;
+    while (z < sizeof(verus_header)) {
+    	z = recvfrom(s, &buf[z], sizeof(verus_header)-z, 0, (struct sockaddr *)&adr, &len);
+    }
+    memcpy (&header, buf, sizeof(verus_header));
 
-    socklen_t len = sizeof(struct sockaddr_in);
-    z = recvfrom(s, pdu, sizeof(udp_packet_t), 0, (struct sockaddr *)&adr, &len);
+    z=0;
+    while (z < header.payloadlength) {
+    	z += recvfrom (s, &buf[z+sizeof(verus_header)], header.payloadlength-z, 0, (struct sockaddr *)&adr, &len);
+    }
+    memcpy (pdu, buf, sizeof (verus_packet));
+
+    //std::cout << "received bytes "<< z << " " << pdu->ss_id << " " << pdu->seq << " \n";
     if ( z < 0 )
       displayError("recvfrom(2)");
 
-    if (pdu->ss_id < 0) {
+
+    if (pdu->header.ss_id < 0) {
       clientLog.close();
       terminate = true;
     }
@@ -202,12 +169,12 @@ int main(int argc,char **argv) {
       sprintf (command, "client_%s.out", port);
       clientLog.open(command);
       receivedPkt = true;
-      io.stop();
       std::cout << "Connected to server \n";
     }
 
     gettimeofday(&timestamp,NULL);
-    sprintf(tmp, "%ld.%06d, %llu\n", timestamp.tv_sec, timestamp.tv_usec, pdu->seq);
+    sprintf(tmp, "%ld.%06d, %llu\n", timestamp.tv_sec, timestamp.tv_usec, pdu->header.seq);
+    // std::cout << tmp << "\n";
     clientLog << tmp;
 
     pkt = (sendPkt *) malloc(sizeof(sendPkt));

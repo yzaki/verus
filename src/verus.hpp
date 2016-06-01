@@ -34,7 +34,7 @@
 #include <boost/assign/std/vector.hpp>
 
 // VERUS PARAMETERS
-#define  MTU 1450
+#define  MTU 1448
 #define  VERUS_M_DECREASE 0.7
 #define  CURVE_TIMER 1e6  // timer in microseconds, how often do we update the curve
 #define  EPOCH 5e3 // Verus epoch in microseconds
@@ -51,20 +51,18 @@
 using namespace alglib;
 
 typedef struct __attribute__((packed, aligned(2))) m {
+  int payloadlength;
   int ss_id;
   unsigned long long seq;
   long long w;
   long long seconds;
   long long millis;
-} udp_packet_t;
+} verus_header;
 
 typedef struct __attribute__((packed, aligned(2))) n {
-  int ss_id;
-  unsigned long long seq;
-  long long w;
-  long long seconds;
-  long long millis;
-} missing_packet_t;
+  verus_header header;
+  char * data;
+} verus_packet;
 
 typedef struct {
   long long w;
@@ -74,6 +72,6 @@ typedef struct {
 void* delayProfile_thread (void *arg);
 void restartSlowStart(void);
 double ewma (double vals, double delay, double alpha);
-udp_packet_t *udp_pdu_init(int seq, unsigned int PACKETSIZE, int w, int ssId);
+verus_packet *udp_pdu_init(int seq, unsigned int PACKETSIZE, int w, int ssId);
 
 #endif /* VERUS_H_ */
