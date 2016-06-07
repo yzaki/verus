@@ -119,6 +119,11 @@ int main(int argc,char **argv) {
     displayError("socket()");
   }
 
+  int reuse = 1;
+  if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse)) < 0)
+	perror("setsockopt(SO_REUSEADDR) failed");
+
+
   memset(&adr_srvr,0,sizeof (adr_srvr));
   adr_srvr.sin_family = AF_INET;
   adr_srvr.sin_port = htons(atoi(port));
@@ -148,13 +153,15 @@ int main(int argc,char **argv) {
     }
     memcpy (&header, buf, sizeof(verus_header));
 
+    //std::cout << "received bytes "<< z << " " << header.payloadlength << " " << header.seq << " \n";
+
     z=0;
     while (z < header.payloadlength) {
     	z += recvfrom (s, &buf[z+sizeof(verus_header)], header.payloadlength-z, 0, (struct sockaddr *)&adr, &len);
     }
     memcpy (pdu, buf, sizeof (verus_packet));
 
-    //std::cout << "received bytes "<< z << " " << pdu->ss_id << " " << pdu->seq << " \n";
+    //std::cout << "received bytes "<< z << " " << pdu->header.ss_id << " " << pdu->header.seq << " \n";
     if ( z < 0 )
       displayError("recvfrom(2)");
 
@@ -173,8 +180,8 @@ int main(int argc,char **argv) {
     }
 
     gettimeofday(&timestamp,NULL);
-    sprintf(tmp, "%ld.%06d, %llu\n", timestamp.tv_sec, timestamp.tv_usec, pdu->header.seq);
-    // std::cout << tmp << "\n";
+    //sprintf(tmp, "%ld.%06d, %llu\n", timestamp.tv_sec, timestamp.tv_usec, pdu->header.seq);
+    std::cout << tmp;
     clientLog << tmp;
 
     pkt = (sendPkt *) malloc(sizeof(sendPkt));
