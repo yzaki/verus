@@ -164,7 +164,7 @@ int main(int argc,char **argv) {
     }
     memcpy (&header, buf, sizeof(verus_header));
 
-    std::cout << "received bytes "<< z << " " << header.payloadlength << " " << header.seq << " \n";
+    //std::cout << "received bytes "<< z << " " << header.payloadlength << " " << header.seq << " \n";
 
     z=0;
     while (z < header.payloadlength) {
