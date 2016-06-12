@@ -1,6 +1,3 @@
 You need to copy the appropritate .so file into your wireshark plugins folder.
 You can find this by going into about->plugins and see where the folder is located in your system.
 Copy verus.so there and rerun wireshark
-
-This is only working on port 60001 for linux
-and for ports 60001-60009 for mac
