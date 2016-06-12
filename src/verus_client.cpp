@@ -55,6 +55,8 @@ void* sending_thread (void *arg)
       // sending ACK
       z = send(s, &pkt->pdu->header, sizeof(verus_header), 0);
 
+      //std::cout << "Sending "<< z << " " << pkt->pdu->header.ss_id << " " << pkt->pdu->header.seq << " \n";
+
       free (pkt->pdu);
 
       if (z < 0)
@@ -68,8 +70,9 @@ void* sending_thread (void *arg)
     }
     else{
       pthread_mutex_unlock(&lockSendingList);
-      usleep(0.01);
+      usleep(1);
     }
+    usleep(1);
   }
 
   return NULL;
@@ -121,8 +124,16 @@ int main(int argc,char **argv) {
 
   int reuse = 1;
   if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse)) < 0)
-	perror("setsockopt(SO_REUSEADDR) failed");
+	   perror("setsockopt(SO_REUSEADDR) failed");
 
+  int sndbuf = 1000000;
+  if (setsockopt(s, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) < 0)
+      displayError("socket error() set buf");
+
+  int flag = 1;
+  int result = setsockopt(s,IPPROTO_TCP,TCP_NODELAY,(char *) &flag, sizeof(int));
+  if (result < 0)
+    displayError("socket error() set TCP_NODELAY");
 
   memset(&adr_srvr,0,sizeof (adr_srvr));
   adr_srvr.sin_family = AF_INET;
@@ -153,7 +164,7 @@ int main(int argc,char **argv) {
     }
     memcpy (&header, buf, sizeof(verus_header));
 
-    //std::cout << "received bytes "<< z << " " << header.payloadlength << " " << header.seq << " \n";
+    std::cout << "received bytes "<< z << " " << header.payloadlength << " " << header.seq << " \n";
 
     z=0;
     while (z < header.payloadlength) {
@@ -161,13 +172,13 @@ int main(int argc,char **argv) {
     }
     memcpy (pdu, buf, sizeof (verus_packet));
 
-    //std::cout << "received bytes "<< z << " " << pdu->header.ss_id << " " << pdu->header.seq << " \n";
     if ( z < 0 )
       displayError("recvfrom(2)");
 
 
     if (pdu->header.ss_id < 0) {
       clientLog.close();
+      std::cout << "received SSID " << pdu->header.ss_id << " < 0, will exit \n";
       terminate = true;
     }
 
@@ -181,7 +192,7 @@ int main(int argc,char **argv) {
 
     gettimeofday(&timestamp,NULL);
     //sprintf(tmp, "%ld.%06d, %llu\n", timestamp.tv_sec, timestamp.tv_usec, pdu->header.seq);
-    std::cout << tmp;
+    //std::cout << tmp;
     clientLog << tmp;
 
     pkt = (sendPkt *) malloc(sizeof(sendPkt));

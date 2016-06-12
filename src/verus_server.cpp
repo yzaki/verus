@@ -281,21 +281,35 @@ void* sending_thread (void *arg)
 
                 // FIXME: change packetsize
                 pdu = udp_pdu_init(pktSeq, MTU-sizeof(verus_header), wBar, ssId);
-                //ret = sendto(s1, pdu, MTU, MSG_DONTWAIT, (struct sockaddr *)&adr_clnt, len_inet);
+                ret = sendto(s1, pdu, MTU, MSG_DONTWAIT, (struct sockaddr *)&adr_clnt, len_inet);
                 
-                z = 0;
-                while (z < MTU) {
-                    ret = sendto(s1, pdu+z, MTU-z, 0, (struct sockaddr *)&adr_clnt, len_inet);
-                    z+=ret;
-                }
+                // z = 0;
+                // while (z < MTU) {
+                //     ret = sendto(s1, pdu+z, MTU-z, 0, (struct sockaddr *)&adr_clnt, len_inet);
+                //     z+=ret;
+                // }
 
                 //std::cout << "sending " << pktSeq << " " << ret << "\n";
 
                 if (ret < 0) {
+                    std::cout << "OS Buffer \n";
+
+                    if (slowStart) { // if the current delay exceeds half a second during slow start we should time out and exit slow start
+                        std::cout << "Exit slow start: OS Buffer \n";
+                        wBar = VERUS_M_DECREASE * pdu->header.w;
+                        dEst = 0.75 * dMin * VERUS_R; // setting dEst to half of the allowed maximum delay, for effeciency purposes
+                        lossPhase = true;
+                        slowStart = false;
+                        exitSlowStart = true;
+
+                        write2Log (lossLog, "Exit slow start", "exceeding SS_EXIT_THRESHOLD", "", "", "");
+                    }
+
                     // if UDP buffer of OS is full, we exit slow start and treat the current packet as lost
                     if (errno == ENOBUFS || errno == EAGAIN || errno == EWOULDBLOCK) {
                         // this packet was not sent we should decrease the packet seq number and free the pdu
                         pktSeq --;
+
                         free(pdu);
                         write2Log (lossLog, "OS buffer full", "reached maximum OS UDP buffer size", std::to_string(wCrt), "", "");
                         break; 
@@ -587,9 +601,9 @@ int main(int argc,char **argv) {
     if ( s == -1 )
     	displayError("socket error()");
 
-    // int sndbuf = 1000000;
-    // if (setsockopt(s, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) < 0)
-    //     displayError("socket error() set buf");
+    int sndbuf = 1000000;
+    if (setsockopt(s, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) < 0)
+        displayError("socket error() set buf");
 
     memset(&adr_inet,0,sizeof adr_inet);
     adr_inet.sin_family = AF_INET;
@@ -607,6 +621,12 @@ int main(int argc,char **argv) {
     std::cout << "Server " << port << " waiting for request\n";
     socklen_t size = sizeof(struct sockaddr_in);
     s1 = accept(s, (struct sockaddr*) &client, &size);
+
+    int flag = 1;
+    int result = setsockopt(s1,IPPROTO_TCP,TCP_NODELAY,(char *) &flag, sizeof(int));
+    if (result < 0)
+        displayError("socket error() set TCP_NODELAY");
+
 
     if (stat (name, &info) != 0) {
         sprintf (command, "exec mkdir %s", name);
