@@ -20,7 +20,9 @@ AX_BOOST_BASE([1.54])
 AX_BOOST_SYSTEM()
 AC_CHECK_LIB([pthread], [pthread_mutex_init], [], [echo "pthreads not found.  Please install pthread library before proceeding"; exit -1])
 
-AM_CONDITIONAL(BUILD_OS_IS_DARWIN, [test x"$build_os" = darwin])
+AS_CASE(["$build_os"], [linux*], [build_os="linux"], [darwin*], [build_os="darwin"], [mingw*], [build_os="mingw"])
+AM_CONDITIONAL(BUILD_OS_IS_DARWIN, [test "$build_os" == "darwin"])
+
 
 # Checks for header files.
 AC_CHECK_HEADERS([arpa/inet.h netinet/in.h stdlib.h string.h sys/socket.h sys/time.h unistd.h])
