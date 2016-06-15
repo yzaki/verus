@@ -1,7 +1,5 @@
 #include "verus.hpp"
 
-typedef tbb::concurrent_vector<udp_packet_t*> vec_udp;
-
 int s, err;
 int port;
 

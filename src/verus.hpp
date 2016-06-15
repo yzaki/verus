@@ -18,7 +18,6 @@
 #include <iostream>
 #include <vector>
 #include <math.h>
-#include <tbb/concurrent_vector.h>
 #include <atomic>
 #include <fstream>
 #include <queue>
