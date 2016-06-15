@@ -12,26 +12,30 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <sys/time.h>
 #include <iostream>
 #include <vector>
 #include <math.h>
-#include <tbb/concurrent_vector.h>
-#include <atomic>
 #include <fstream>
+
+#ifndef __ANDROID__
+#include <atomic>
 #include <queue>
 #include <map>
-#include <atomic>
 
 // ALGLIB library
 #include "../lib/alglib/src/ap.h"
 #include "../lib/alglib/src/interpolation.h"
+using namespace alglib;
 
 #include <boost/asio.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/assign/std/vector.hpp>
+
+#endif
 
 // VERUS PARAMETERS
 #define  MTU 1448
@@ -47,8 +51,6 @@
 #define  MIN_TIMEOUT 150.0
 #define  MISSING_PKT_EXPIRY 150.0
 #define  MAX_W_DELAY_CURVE 40000
-
-using namespace alglib;
 
 typedef struct __attribute__((packed, aligned(2))) m {
   int payloadlength;
