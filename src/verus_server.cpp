@@ -265,9 +265,16 @@ int calcSi (double wBar) {
 
 void* sending_thread (void *arg)
 {
-    int i, ret, z;
+    // int s1;
+    int i, ret, z, tmp;
     int sPkts;
     verus_packet *pdu;
+    //struct timeval currentTime;
+
+    // s1 = socket(AF_INET,SOCK_DGRAM,0);
+
+    // if ( s1 == -1 )
+    //     displayError("socket error()");
 
     while (!terminate) {
         while (tempS > 0) {
@@ -276,57 +283,68 @@ void* sending_thread (void *arg)
 
             for (i=0; i<sPkts; i++) {
                 pktSeq ++;
-
-                // FIXME: change packetsize
                 pdu = udp_pdu_init(pktSeq, MTU-sizeof(verus_header), wBar, ssId);
-                ret = sendto(s1, pdu, MTU, MSG_DONTWAIT, (struct sockaddr *)&adr_clnt, len_inet);
-                
-                // z = 0;
-                // while (z < MTU) {
-                //     ret = sendto(s1, pdu+z, MTU-z, 0, (struct sockaddr *)&adr_clnt, len_inet);
-                //     z+=ret;
-                // }
+                z = 0;
+                while (z < MTU) {
+                    ret = sendto(s1, pdu+z, MTU-z, 0, (struct sockaddr *)&adr_clnt, len_inet);
+                    z += ret;
+                }
 
-                //std::cout << "sending " << pktSeq << " " << ret << "\n";
+                // std::cout << pktSeq <<" " <<  pdu->header.payloadlength <<" " << ret << " "<<sizeof(pdu)<< "\n";
 
                 if (ret < 0) {
-                    std::cout << "OS Buffer \n";
+                    
+                	// if UDP buffer of OS is full, we exit slow start and treat the current packet as lost
+                	if (errno == ENOBUFS || errno == EAGAIN || errno == EWOULDBLOCK) {
+                	
+                    	if (slowStart) {
+                	
+                    		lossPhase = true;
+                			exitSlowStart = true;
+		                    wBar = 0.49 * pdu->header.w; // this is so that we dont switch exitslowstart until we receive packets that are not from slow start
+		                    dEst = 0.75*dMin*VERUS_R; // setting dEst to half of the allowed maximum delay, for effeciency purposes
+		                    slowStart = false;
 
-                    if (slowStart) { // if the current delay exceeds half a second during slow start we should time out and exit slow start
-                        std::cout << "Exit slow start: OS Buffer \n";
-                        wBar = VERUS_M_DECREASE * pdu->header.w;
-                        dEst = 0.75 * dMin * VERUS_R; // setting dEst to half of the allowed maximum delay, for effeciency purposes
-                        lossPhase = true;
-                        slowStart = false;
-                        exitSlowStart = true;
+		                    // this packet was not sent we should decrease the packet seq number and free the pdu
+		                    pktSeq --;
+		                    free(pdu);
 
-                        write2Log (lossLog, "Exit slow start", "exceeding SS_EXIT_THRESHOLD", "", "", "");
-                    }
+		                    write2Log (lossLog, "Exit slow start", "reached maximum OS UDP buffer size", std::to_string(wCrt), "", "");
 
-                    // if UDP buffer of OS is full, we exit slow start and treat the current packet as lost
-                    if (errno == ENOBUFS || errno == EAGAIN || errno == EWOULDBLOCK) {
-                        // this packet was not sent we should decrease the packet seq number and free the pdu
-                        pktSeq --;
+		                    break;
+                		}
+                		else {
 
-                        free(pdu);
-                        write2Log (lossLog, "OS buffer full", "reached maximum OS UDP buffer size", std::to_string(wCrt), "", "");
-                        break; 
-                    }
-                    else
-                        displayError("sendto(2)");
-                }
-                // storing sending packet info in sending list with sending time
-                pthread_mutex_lock(&lockSendingList);
-                sendingList[pdu->header.seq]=pdu->header.w;
-                pthread_mutex_unlock(&lockSendingList);
-                free (pdu);
+                			// this is normal sending, OS UDP buffer is full, discard this packet and treat as lost
+							wBar = fmax(1.0, VERUS_M_DECREASE * wBar);
+					        dEst = calcDelayCurveInv (wBar);
+                            
+					        // this packet was not sent we should decrease the packet seq number and free the pdu
+		                    pktSeq --;
+		                    free(pdu);
+
+		                    write2Log (lossLog, "Loss", "reached maximum OS UDP buffer size", std::to_string(errno), "", "");
+
+		                    break;
+                		}
+	                }
+	                else
+	                	displayError("sendto(2)");
+	            }
+
+	            // storing sending packet info in sending list with sending time
+	            pthread_mutex_lock(&lockSendingList);
+	            sendingList[pdu->header.seq]=pdu->header.w;
+	            pthread_mutex_unlock(&lockSendingList);
+	            free (pdu);
 
                 // sending one new packet -> increase packets in flight
                 wCrt ++;
             }
             if (tempS > 0 && !slowStart)
-                write2Log (lossLog, "Epoch Error", "couldn't send everything within the epoch. Have more to send", std::to_string(tempS.load()), std::to_string(slowStart), "");
+            	write2Log (lossLog, "Epoch Error", "couldn't send everything within the epoch. Have more to send", std::to_string(tempS.load()), std::to_string(slowStart), "");
         }
+        usleep(1);
     }
     return NULL;
 }
@@ -602,6 +620,10 @@ int main(int argc,char **argv) {
     int sndbuf = 1000000;
     if (setsockopt(s, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) < 0)
         displayError("socket error() set buf");
+
+    int reuse = 1;
+    if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse)) < 0)
+       perror("setsockopt(SO_REUSEADDR) failed");
 
     memset(&adr_inet,0,sizeof adr_inet);
     adr_inet.sin_family = AF_INET;
