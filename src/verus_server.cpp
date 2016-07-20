@@ -318,15 +318,10 @@ int calcSi (double wBar) {
 
 void* sending_thread (void *arg)
 {
-    int s1;
     int i, ret;
     int sPkts;
     udp_packet_t *pdu;
     //struct timeval currentTime;
-
-    s1 = socket(AF_INET,SOCK_DGRAM,0);
-    if ( s1 == -1 )
-        displayError("socket error()");
 
     while (!terminate) {
         while (tempS > 0) {
@@ -338,7 +333,7 @@ void* sending_thread (void *arg)
                 pdu = udp_pdu_init(pktSeq, MTU, wBar, ssId);
                 //gettimeofday(&currentTime,NULL);
 
-                ret = sendto(s1, pdu, MTU, MSG_DONTWAIT, (struct sockaddr *)&adr_clnt, len_inet);
+                ret = sendto(s, pdu, MTU, MSG_DONTWAIT, (struct sockaddr *)&adr_clnt, len_inet);
 
                 if (ret < 0) {
                     // if UDP buffer of OS is full, we exit slow start and treat the current packet as lost
