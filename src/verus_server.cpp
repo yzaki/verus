@@ -245,8 +245,8 @@ void restartSlowStart(void) {
 double calcDelayCurve (double delay) {
     int w;
 
-    for (w=2; w < MAX_W_DELAY_CURVE; w++) {
-        if (!haveSpline) {
+    if (!haveSpline) {
+        for (w=2; w < MAX_W_DELAY_CURVE; w++) {
             pthread_mutex_lock(&lockWList);
             if (wList[w] > delay) {
                 pthread_mutex_unlock(&lockWList);
@@ -254,7 +254,9 @@ double calcDelayCurve (double delay) {
             }
             pthread_mutex_unlock(&lockWList);
         }
-        else {
+    }
+    else {
+        for (w=2; w < MAX_W_DELAY_CURVE; w++) {
             pthread_mutex_lock(&lockSPline);
             try {
                 if (spline1dcalc(spline, w) > delay) {
@@ -342,7 +344,7 @@ void* sending_thread (void *arg)
                             lossPhase = true;
                             exitSlowStart = true;
                             wBar = 0.49 * pdu->w; // this is so that we dont switch exitslowstart until we receive packets that are not from slow start
-                            dEst = 0.75*dMin*VERUS_R; // setting dEst to half of the allowed maximum delay, for effeciency purposes
+                            dEst = calcDelayCurveInv(wBar);// 0.75*dMin*VERUS_R; // setting dEst to half of the allowed maximum delay, for effeciency purposes
                             slowStart = false;
 
                             // this packet was not sent we should decrease the packet seq number and free the pdu
@@ -634,7 +636,7 @@ void* receiver_thread (void *arg)
 
         if (slowStart && delay > SS_EXIT_THRESHOLD) { // if the current delay exceeds half a second during slow start we should time out and exit slow start
             wBar = VERUS_M_DECREASE * pdu->w;
-            dEst = 0.75 * dMin * VERUS_R; // setting dEst to half of the allowed maximum delay, for effeciency purposes
+            dEst = calcDelayCurveInv(wBar); //0.75 * dMin * VERUS_R; // setting dEst to half of the allowed maximum delay, for effeciency purposes
             lossPhase = true;
             slowStart = false;
             exitSlowStart = true;
