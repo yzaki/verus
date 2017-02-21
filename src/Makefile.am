@@ -7,7 +7,7 @@ ACLOCAL_AMFLAGS = -I m4
 verus_client_LDADD = -lpthread $(BOOST_SYSTEM_LIB)
 
 if BUILD_OS_IS_DARWIN
-verus_server_LDADD = -lpthread -lalglib3 $(BOOST_SYSTEM_LIB)
+verus_server_LDADD = -lpthread -lalglib $(BOOST_SYSTEM_LIB)
 else
 verus_server_LDADD = -lpthread -lalglib $(BOOST_SYSTEM_LIB)
 endif
