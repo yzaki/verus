@@ -550,7 +550,7 @@ void removeExpiredPacketsFromSeqQueue (struct timeval receivedtime) {
                 write2Log (lossLog, "Missing packet expired", std::to_string(pdu->seq), "", "", ""); // we are only recordering the first missing packet expiry per loss phase
 
                 // get the w of the lost packet and do multiplicative decrease
-                wBar = fmin( wBar, VERUS_M_DECREASE * pdu->w);
+                wBar = fmax(1.0, fmin(wBar, VERUS_M_DECREASE * pdu->w));
 
                 if (slowStart){
                     pthread_mutex_lock(&lockWList);
